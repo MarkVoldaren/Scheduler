@@ -1,0 +1,19 @@
+{
+  "name": "scheduler-operations",
+  "version": "1.0.0",
+  "description": "Server-backed Scheduler Operations app with persistent CSV uploads and shared capacity settings.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check app.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "cookie-session": "^2.1.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

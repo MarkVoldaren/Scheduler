@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scheduler</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <section id="login-screen" class="login-screen" hidden>
+      <form id="login-form" class="login-card">
+        <p class="panel-kicker">Scheduler Operations</p>
+        <h1>Sign in</h1>
+        <p class="login-copy">Enter the shared app password to access the active schedule and operational settings.</p>
+        <label class="login-field" for="login-password">
+          <span>Password</span>
+          <input id="login-password" type="password" autocomplete="current-password" required />
+        </label>
+        <p id="login-error" class="login-error" role="alert" hidden></p>
+        <button class="button button-primary login-submit" type="submit">Enter Scheduler</button>
+      </form>
+    </section>
+
+    <div class="dashboard-shell">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-head">
+          <button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-label="Toggle navigation">
+            <span class="sidebar-toggle-lines" aria-hidden="true"></span>
+          </button>
+          <div class="sidebar-brand">
+            <span class="sidebar-brand-mark">SP</span>
+            <div class="sidebar-brand-copy">
+              <span class="sidebar-brand-title">Scheduler</span>
+              <span class="sidebar-brand-subtitle">Operations</span>
+            </div>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Scheduler navigation">
+          <button id="view-sequencers" class="sidebar-link is-active" type="button" data-view="sequencers" aria-pressed="true">
+            <span class="sidebar-link-icon">S</span>
+            <span class="sidebar-link-label">Scheduler</span>
+          </button>
+          <button id="view-capacity" class="sidebar-link" type="button" data-view="capacity" aria-pressed="false">
+            <span class="sidebar-link-icon">C</span>
+            <span class="sidebar-link-label">Capacity</span>
+          </button>
+          <button id="view-kpi" class="sidebar-link" type="button" data-view="kpi" aria-pressed="false">
+            <span class="sidebar-link-icon">K</span>
+            <span class="sidebar-link-label">KPI Board</span>
+          </button>
+          <button id="view-departments" class="sidebar-link" type="button" data-view="departments" aria-pressed="false">
+            <span class="sidebar-link-icon">D</span>
+            <span class="sidebar-link-label">Departments</span>
+          </button>
+          <button id="view-pick-list" class="sidebar-link" type="button" data-view="pick-list" aria-pressed="false">
+            <span class="sidebar-link-icon">P</span>
+            <span class="sidebar-link-label">Pick List</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="live-pill sidebar-source-pill" id="source-pill">Awaiting source</span>
+          <button id="theme-toggle" class="icon-button sidebar-footer-button" type="button" aria-label="Toggle theme">
+            <span class="theme-icon theme-icon-sun" aria-hidden="true">Light</span>
+            <span class="theme-icon theme-icon-moon" aria-hidden="true">Dark</span>
+          </button>
+          <label class="button button-secondary sidebar-footer-button" for="csv-input">Choose CSV</label>
+          <button id="logout-button" class="button button-secondary sidebar-footer-button" type="button">Logout</button>
+          <input id="csv-input" type="file" accept=".csv" hidden />
+        </div>
+      </aside>
+
+      <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+
+      <div class="app-shell">
+        <button id="mobile-sidebar-toggle" class="icon-button mobile-sidebar-toggle mobile-sidebar-floating" type="button" aria-label="Open navigation">
+          <span class="sidebar-toggle-lines" aria-hidden="true"></span>
+        </button>
+
+        <div class="workspace-grid">
+          <main class="workspace-main">
+            <section class="page-view" id="page-capacity" data-page="capacity">
+              <main class="panel panel-primary panel-wide">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-kicker">Capacity Configuration</p>
+                    <h2>Daily Work Center Capacity</h2>
+                  </div>
+                  <div class="panel-head-meta">
+                    <span class="panel-note">Set available production hours per day for each department</span>
+                  </div>
+                </div>
+                <div id="capacity-grid" class="capacity-grid"></div>
+              </main>
+            </section>
+
+            <section class="page-view" id="page-kpi" data-page="kpi">
+              <main class="kpi-board">
+                <div class="kpi-board-head">
+                  <div>
+                    <p class="panel-kicker">Department Load KPI Board</p>
+                    <h2>Department Load KPI Board</h2>
+                    <p class="kpi-board-subtitle">Monitor department utilization, backlog, and near-term load</p>
+                  </div>
+                </div>
+                <section class="kpi-filter-bar" aria-label="Department load KPI controls">
+                  <div class="control-field kpi-control">
+                    <label for="kpi-department-group">Department Group</label>
+                    <select id="kpi-department-group"></select>
+                  </div>
+                  <div class="control-field kpi-control">
+                    <label for="kpi-horizon">Horizon</label>
+                    <select id="kpi-horizon">
+                      <option value="7">1 Week / 7 Days</option>
+                      <option value="14" selected>2 Weeks / 14 Days</option>
+                      <option value="28">4 Weeks / 28 Days</option>
+                    </select>
+                  </div>
+                  <label class="sequencer-toggle kpi-current-toggle" for="kpi-current-only">
+                    <span class="sequencer-toggle-copy">
+                      <span class="sequencer-toggle-label">Current Only</span>
+                      <span class="sequencer-toggle-note">Only jobs currently here</span>
+                    </span>
+                    <span class="sequencer-toggle-track">
+                      <input id="kpi-current-only" type="checkbox" />
+                      <span class="sequencer-toggle-thumb" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <div class="control-field kpi-control">
+                    <label for="kpi-sort">Sort By</label>
+                    <select id="kpi-sort">
+                      <option value="highest-load" selected>Highest Load</option>
+                      <option value="most-past-due">Most Past Due</option>
+                      <option value="most-open-hours">Most Open Hours</option>
+                      <option value="department-az">Department A-Z</option>
+                    </select>
+                  </div>
+                </section>
+                <div id="kpi-board-root" class="kpi-board-root"></div>
+              </main>
+            </section>
+
+            <section class="page-view" id="page-pick-list" data-page="pick-list">
+              <main class="panel panel-primary panel-wide">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-kicker">Shipping Pick List</p>
+                    <h2>Pick List</h2>
+                  </div>
+                  <div class="panel-head-meta">
+                    <span class="panel-note">Upload a shipping schedule CSV to group picks by ship timing</span>
+                  </div>
+                </div>
+                <input id="shipping-csv-input" type="file" accept=".csv" hidden />
+                <div id="pick-list-root" class="pick-list-root"></div>
+              </main>
+            </section>
+
+            <section class="page-view" id="page-departments" data-page="departments">
+              <main class="panel panel-primary panel-wide">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-kicker">Department Viewer</p>
+                    <h2>Daily Department Hours</h2>
+                  </div>
+                  <div class="panel-head-meta">
+                    <span class="panel-note">Open department hours grouped by ship-by date</span>
+                  </div>
+                </div>
+                <div class="department-viewer-toolbar">
+                  <div class="control-field department-viewer-control">
+                    <label for="department-viewer-center-select">Department</label>
+                    <select id="department-viewer-center-select"></select>
+                  </div>
+                  <label class="sequencer-toggle department-viewer-toggle" for="department-viewer-current-only">
+                    <span class="sequencer-toggle-copy">
+                      <span class="sequencer-toggle-label">Current Only</span>
+                      <span class="sequencer-toggle-note">Only jobs currently here</span>
+                    </span>
+                    <span class="sequencer-toggle-track">
+                      <input id="department-viewer-current-only" type="checkbox" />
+                      <span class="sequencer-toggle-thumb" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <label id="department-mode-toggle-label" class="department-mode-toggle" for="department-mode-toggle">
+                    <span class="department-mode-label department-mode-label-compact">Compact</span>
+                    <span class="department-mode-track">
+                      <input id="department-mode-toggle" type="checkbox" aria-label="Toggle detailed department view" />
+                      <span class="department-mode-thumb" aria-hidden="true"></span>
+                    </span>
+                    <span class="department-mode-label department-mode-label-detailed">Detailed</span>
+                  </label>
+                  <button id="department-customer-export" class="button button-primary department-export-button" type="button">
+                    Export Customer Hours
+                  </button>
+                </div>
+                <div id="department-viewer" class="department-viewer"></div>
+              </main>
+            </section>
+
+            <section class="page-view is-active" id="page-sequencers" data-page="sequencers">
+              <main class="panel panel-primary panel-wide">
+                <div class="panel-head panel-head-sequencer">
+                  <p class="panel-kicker">Scheduler</p>
+                  <div class="panel-head-meta">
+                    <span class="panel-note">Production-date queue with optional incoming work and all-department master view</span>
+                  </div>
+                </div>
+                <section class="toolbar toolbar-inline" aria-label="Scheduler controls">
+                  <div class="toolbar-grid toolbar-grid-scheduler">
+                    <div class="control-field control-field-search">
+                      <label for="search-input">Search</label>
+                      <div class="input-shell">
+                        <span class="input-icon" aria-hidden="true">Find</span>
+                        <input id="search-input" type="search" placeholder="WO, combo, customer, part..." />
+                      </div>
+                    </div>
+                    <label class="sequencer-toggle sequencer-toggle-compact" for="sequencer-partials-only">
+                      <span class="sequencer-toggle-copy">
+                        <span class="sequencer-toggle-label">Partials</span>
+                        <span class="sequencer-toggle-note">Only partial ops</span>
+                      </span>
+                      <span class="sequencer-toggle-track">
+                        <input id="sequencer-partials-only" type="checkbox" />
+                        <span class="sequencer-toggle-thumb" aria-hidden="true"></span>
+                      </span>
+                    </label>
+                  </div>
+                </section>
+                <div class="sequencer-toolbar">
+                  <div class="control-field sequencer-control">
+                    <label for="sequencer-center-select">Department</label>
+                    <select id="sequencer-center-select"></select>
+                  </div>
+                  <label class="sequencer-toggle" for="sequencer-include-incoming">
+                    <span class="sequencer-toggle-copy">
+                      <span class="sequencer-toggle-label">Incoming</span>
+                      <span class="sequencer-toggle-note">Include incoming ops</span>
+                    </span>
+                    <span class="sequencer-toggle-track">
+                      <input id="sequencer-include-incoming" type="checkbox" checked />
+                      <span class="sequencer-toggle-thumb" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <div id="sequencer-top-stats" class="sequencer-top-stats" aria-live="polite"></div>
+                </div>
+                <div id="sequencers-grid" class="sequencer-single"></div>
+              </main>
+            </section>
+          </main>
+        </div>
+      </div>
+    </div>
+
+    <template id="empty-state-template">
+      <div class="empty-state">
+        <div class="empty-state-icon" aria-hidden="true">Queue</div>
+        <h3>No jobs to show</h3>
+        <p>Adjust the filters or load a different CSV export.</p>
+      </div>
+    </template>
+
+    <div id="work-order-modal" class="modal-shell" hidden>
+      <div class="modal-backdrop" data-modal-close></div>
+      <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="work-order-modal-title">
+        <button id="work-order-modal-close" class="modal-close" type="button" aria-label="Close work order schedule">Close</button>
+        <div id="work-order-modal-body"></div>
+      </section>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
