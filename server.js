@@ -8,6 +8,7 @@ const express = require("express");
 const multer = require("multer");
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "127.0.0.1";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 const DB_PATH = process.env.SQLITE_PATH || path.join(DATA_DIR, "app.sqlite");
@@ -179,8 +180,8 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: "Unexpected server error" });
 });
 
-app.listen(PORT, "127.0.0.1", () => {
-  console.log(`Scheduler Operations listening on http://127.0.0.1:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`Scheduler Operations listening on http://${HOST}:${PORT}`);
 });
 
 function requireAuth(req, res, next) {

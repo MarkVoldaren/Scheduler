@@ -1,0 +1,20 @@
+services:
+  scheduler-app:
+    build: .
+    container_name: scheduler-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    networks:
+      - gospellight_scheduler
+
+networks:
+  gospellight_scheduler:
+    external: true

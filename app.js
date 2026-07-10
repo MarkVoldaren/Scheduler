@@ -20,6 +20,7 @@ const OPERATIONAL_SETTING_KEYS = [
   "capacityHorizonShifts",
   "flowLocations",
 ];
+const API_BASE_PATH = getApiBasePath();
 const DEPARTMENT_VIEW_MODES = new Set(["compact", "detailed"]);
 const DEFAULT_MACHINE_CAPACITY_PER_DAY = DEFAULT_DAILY_CAPACITY;
 const DEFAULT_MAN_HOURS_PER_DAY = DEFAULT_DAILY_CAPACITY;
@@ -621,7 +622,7 @@ async function uploadAndHydrateCsv(kind, file) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, {
+  const response = await fetch(resolveApiUrl(url), {
     credentials: "same-origin",
     ...options,
   });
@@ -642,7 +643,7 @@ async function fetchJson(url, options = {}) {
 }
 
 async function fetchText(url) {
-  const response = await fetch(url, { credentials: "same-origin" });
+  const response = await fetch(resolveApiUrl(url), { credentials: "same-origin" });
   if (response.status === 401) {
     setAuthenticated(false, "Your session expired. Sign in again.");
     throw new Error("Session expired.");
@@ -658,6 +659,18 @@ async function fetchText(url) {
     throw new Error(message);
   }
   return response.text();
+}
+
+function resolveApiUrl(url) {
+  if (!url.startsWith("/api")) {
+    return url;
+  }
+  return `${API_BASE_PATH}${url}`;
+}
+
+function getApiBasePath() {
+  const path = window.location.pathname || "/";
+  return path === "/scheduler" || path.startsWith("/scheduler/") ? "/scheduler" : "";
 }
 
 function renderAfterCapacitySettingsChange() {
