@@ -13,8 +13,8 @@ services:
     volumes:
       - ./data:/app/data
     networks:
-      - gospellight_scheduler
+      - apps_proxy
 
 networks:
-  gospellight_scheduler:
+  apps_proxy:
     external: true

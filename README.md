@@ -38,17 +38,24 @@ New CSV uploads overwrite the active CSV file. The app does not retain upload hi
 - `SQLITE_PATH`: SQLite path, defaults to `${DATA_DIR}/app.sqlite`.
 - `MAX_UPLOAD_BYTES`: upload limit, defaults to `52428800`.
 
-## Droplet Deployment With Existing Gospel Light Caddy
+## Droplet Deployment
 
-This droplet already has a Docker Caddy reverse proxy container named `gospellight-caddy-1` using the external Docker network `gospellight_scheduler`. Deploy Scheduler as a Docker container on that same network and route `/scheduler/` through the existing Duramark domain.
+The Jay's Apps droplet uses one central Docker Caddy proxy and one shared external Docker network:
+
+- Production root: `/opt/apps`
+- Central Caddyfile: `/opt/apps/proxy/Caddyfile`
+- Proxy container: `apps-caddy`
+- Shared Docker network: `apps_proxy`
+
+Deploy Scheduler as a Docker container on that shared network and route `/scheduler/` through the existing Duramark domain.
 
 Clone and configure:
 
 ```bash
-cd /opt
-sudo git clone https://github.com/MarkVoldaren/Scheduler.git scheduler-operations
-sudo chown -R "$USER":"$USER" /opt/scheduler-operations
-cd /opt/scheduler-operations
+mkdir -p /opt/apps/duramark
+cd /opt/apps/duramark
+git clone https://github.com/MarkVoldaren/Scheduler.git scheduler
+cd /opt/apps/duramark/scheduler
 cp .env.example .env
 nano .env
 ```
@@ -67,25 +74,28 @@ docker compose up -d --build
 docker ps --filter name=scheduler-app
 ```
 
-Edit the existing active Caddyfile:
+Edit the central active Caddyfile:
 
 ```bash
-sudo nano /opt/gospellight/Caddyfile
+sudo nano /opt/apps/proxy/Caddyfile
 ```
 
 Inside the existing `duramark.jays-apps.com` site block, add the Scheduler route before the fallback Duramark selector route:
 
 ```caddyfile
+redir /scheduler /scheduler/
+
 handle_path /scheduler/* {
     reverse_proxy scheduler-app:3000
 }
 ```
 
-Validate and reload the running Caddy container:
+Validate and restart the central proxy:
 
 ```bash
-docker exec gospellight-caddy-1 caddy validate --config /etc/caddy/Caddyfile
-docker exec gospellight-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+docker run --rm -v /opt/apps/proxy/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+cd /opt/apps/proxy
+docker compose restart caddy
 ```
 
 Test:
@@ -97,10 +107,11 @@ curl -I https://duramark.jays-apps.com/scheduler/
 Deploy updates later:
 
 ```bash
-cd /opt/scheduler-operations
+cd /opt/apps/duramark/scheduler
 git pull
 docker compose up -d --build
-docker exec gospellight-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+cd /opt/apps/proxy
+docker compose restart caddy
 ```
 
 Back up `data/app.sqlite` and `data/uploads/*.csv` if you need to preserve the current operational state before replacing or moving the droplet.
