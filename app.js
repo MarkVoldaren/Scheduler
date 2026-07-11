@@ -4719,12 +4719,14 @@ function renderMiniSequenceTrack(job, focusOperationId) {
     }
 
     if (previousSequence !== null && operation.sequence - previousSequence > 1) {
-      segments.push(`
-        <span class="mini-segment mini-segment-gap" title="${escapeHtml(`Missing operations between Op ${previousSequence} and Op ${operation.sequence}`)}">
-          <span class="mini-segment-fill"></span>
-          <span class="mini-segment-label">Gap</span>
-        </span>
-      `);
+      for (let sequence = previousSequence + 1; sequence < operation.sequence; sequence += 1) {
+        segments.push(`
+          <span class="mini-segment mini-segment-gap" title="${escapeHtml(`Missing operation | Op ${sequence}`)}">
+            <span class="mini-segment-fill"></span>
+            <span class="mini-segment-label">Gap</span>
+          </span>
+        `);
+      }
     }
 
     const classes = ["mini-segment", `mini-segment-${operation.phase}`, operation.key === focusOperationId ? "is-focus" : ""]
