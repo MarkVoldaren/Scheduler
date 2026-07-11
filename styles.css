@@ -1984,6 +1984,7 @@ body[data-modal-open="true"] {
 
 .capacity-card,
 .sequencer-card {
+  min-width: 0;
   padding: 12px;
 }
 
@@ -2164,13 +2165,13 @@ body[data-modal-open="true"] {
 
 .capacity-flow-section-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
   gap: 8px;
   min-width: 0;
 }
 
 .capacity-flow-groups-compact .capacity-flow-section-cards {
-  grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
 }
 
 .capacity-flow-groups-compact .capacity-card {
@@ -2220,6 +2221,12 @@ body[data-modal-open="true"] {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.capacity-settings-grid .control-field,
+.capacity-card select,
+.capacity-card input {
+  min-width: 0;
 }
 
 .capacity-manning-section {
