@@ -4710,8 +4710,8 @@ function renderMiniSequenceTrack(job, focusOperationId) {
         segments.push(
           createMiniTrackSegment({
             classes: "mini-segment mini-segment-complete mini-segment-implicit",
-            title: `Completed prior operation | Op ${sequence}`,
-            label: "Complete",
+            title: `Inferred completed prior operation | Op ${sequence}`,
+            label: "Completed Op",
             fillRatio: 1,
           })
         );
@@ -4721,9 +4721,9 @@ function renderMiniSequenceTrack(job, focusOperationId) {
     if (previousSequence !== null && operation.sequence - previousSequence > 1) {
       for (let sequence = previousSequence + 1; sequence < operation.sequence; sequence += 1) {
         segments.push(`
-          <span class="mini-segment mini-segment-gap" title="${escapeHtml(`Missing operation | Op ${sequence}`)}">
+          <span class="mini-segment mini-segment-gap" title="${escapeHtml(`Missing source operation | Op ${sequence}`)}">
             <span class="mini-segment-fill"></span>
-            <span class="mini-segment-label">Gap</span>
+            <span class="mini-segment-label">Missing Op</span>
           </span>
         `);
       }
