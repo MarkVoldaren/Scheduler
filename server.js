@@ -33,6 +33,8 @@ const SETTING_KEYS = [
   "machineCapacities",
   "manHourCapacities",
   "manHoursByDay",
+  "temporaryAdditionalManning",
+  "manningMultipliers",
   "capacityModes",
   "capacityHorizonShifts",
   "flowLocations",
@@ -287,6 +289,8 @@ function sanitizeOperationalSettings(input) {
   output.machineCapacities = sanitizeNumberMap(input.machineCapacities);
   output.manHourCapacities = sanitizeNumberMap(input.manHourCapacities);
   output.manHoursByDay = sanitizeWeekdayMap(input.manHoursByDay);
+  output.temporaryAdditionalManning = sanitizeNumberMap(input.temporaryAdditionalManning);
+  output.manningMultipliers = sanitizePositiveNumberMap(input.manningMultipliers);
   output.capacityModes = sanitizeStringMap(input.capacityModes);
   output.capacityHorizonShifts = sanitizeHorizonShiftMap(input.capacityHorizonShifts);
   output.flowLocations = sanitizeStringMap(input.flowLocations);
@@ -301,6 +305,20 @@ function sanitizeNumberMap(input) {
   Object.entries(input).forEach(([key, value]) => {
     const parsed = Number(value);
     if (key && Number.isFinite(parsed) && parsed >= 0) {
+      output[String(key)] = parsed;
+    }
+  });
+  return output;
+}
+
+function sanitizePositiveNumberMap(input) {
+  if (!isPlainObject(input)) {
+    return {};
+  }
+  const output = {};
+  Object.entries(input).forEach(([key, value]) => {
+    const parsed = Number(value);
+    if (key && Number.isFinite(parsed) && parsed > 0) {
       output[String(key)] = parsed;
     }
   });

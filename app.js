@@ -5,6 +5,8 @@ const CAPACITY_STORAGE_KEY = "screen-print-scheduler-capacities";
 const MACHINE_CAPACITY_STORAGE_KEY = "screen-print-scheduler-machine-capacities";
 const MAN_HOURS_STORAGE_KEY = "screen-print-scheduler-man-hours";
 const MAN_HOURS_BY_DAY_STORAGE_KEY = "screen-print-scheduler-man-hours-by-day";
+const TEMPORARY_MANNING_STORAGE_KEY = "screen-print-scheduler-temporary-additional-manning";
+const MANNING_MULTIPLIER_STORAGE_KEY = "screen-print-scheduler-manning-multipliers";
 const CAPACITY_MODE_STORAGE_KEY = "screen-print-scheduler-capacity-modes";
 const CAPACITY_HORIZON_SHIFT_STORAGE_KEY = "screen-print-scheduler-capacity-horizon-shifts";
 const FLOW_LOCATION_STORAGE_KEY = "screen-print-scheduler-flow-locations";
@@ -16,6 +18,8 @@ const OPERATIONAL_SETTING_KEYS = [
   "machineCapacities",
   "manHourCapacities",
   "manHoursByDay",
+  "temporaryAdditionalManning",
+  "manningMultipliers",
   "capacityModes",
   "capacityHorizonShifts",
   "flowLocations",
@@ -24,6 +28,8 @@ const API_BASE_PATH = getApiBasePath();
 const DEPARTMENT_VIEW_MODES = new Set(["compact", "detailed"]);
 const DEFAULT_MACHINE_CAPACITY_PER_DAY = DEFAULT_DAILY_CAPACITY;
 const DEFAULT_MAN_HOURS_PER_DAY = DEFAULT_DAILY_CAPACITY;
+const DEFAULT_MANNING_MULTIPLIER = 1;
+const TEMP_MANNING_HOURS_PER_FTE = 8;
 const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 const CAPACITY_WEEKDAYS = [
   { key: "mon", label: "Mon" },
@@ -129,6 +135,8 @@ function createInitialState() {
     machineCapacities: {},
     manHourCapacities: {},
     manHoursByDay: {},
+    temporaryAdditionalManning: {},
+    manningMultipliers: {},
     capacityModes: {},
     capacityHorizonShifts: {},
     flowLocations: {},
@@ -701,7 +709,11 @@ function focusCapacitySearch() {
 }
 
 function isCapacityValueInput(input) {
-  return input.dataset.machineCenter !== undefined || input.dataset.laborCenter !== undefined || input.dataset.manDayCenter !== undefined;
+  return input.dataset.machineCenter !== undefined ||
+    input.dataset.laborCenter !== undefined ||
+    input.dataset.manDayCenter !== undefined ||
+    input.dataset.tempManningCenter !== undefined ||
+    input.dataset.manningMultiplierCenter !== undefined;
 }
 
 function commitCapacityValueInput(input) {
@@ -712,6 +724,10 @@ function commitCapacityValueInput(input) {
     updateManHoursPerDay(state, input.dataset.laborCenter, rawValue);
   } else if (input.dataset.manDayCenter !== undefined) {
     updateManHoursForWeekday(state, input.dataset.manDayCenter, input.dataset.manDay, rawValue);
+  } else if (input.dataset.tempManningCenter !== undefined) {
+    updateTemporaryAdditionalManning(state, input.dataset.tempManningCenter, rawValue);
+  } else if (input.dataset.manningMultiplierCenter !== undefined) {
+    updateManningMultiplier(state, input.dataset.manningMultiplierCenter, rawValue);
   } else {
     return;
   }
@@ -998,12 +1014,16 @@ function syncCapacities(targetState) {
   const storedMachineCapacities = loadStoredMachineCapacities();
   const storedManHourCapacities = loadStoredManHourCapacities();
   const storedManHoursByDay = loadStoredManHoursByDay();
+  const storedTemporaryManning = loadStoredTemporaryAdditionalManning();
+  const storedManningMultipliers = loadStoredManningMultipliers();
   const storedCapacityModes = loadStoredCapacityModes();
   const storedHorizonShifts = loadStoredCapacityHorizonShifts();
   const nextEffective = {};
   const nextMachine = {};
   const nextLabor = {};
   const nextLaborByDay = {};
+  const nextTemporaryManning = {};
+  const nextManningMultipliers = {};
   const nextModes = {};
   const nextHorizonShifts = {};
 
@@ -1024,19 +1044,34 @@ function syncCapacities(targetState) {
     nextModes[center] = normalizeCapacityMode(
       storedCapacityModes[center] ?? targetState.capacityModes[center] ?? getDefaultCapacityMode(center)
     );
+    nextTemporaryManning[center] = parseCapacityValue(
+      storedTemporaryManning[center] ?? targetState.temporaryAdditionalManning[center],
+      0
+    );
+    nextManningMultipliers[center] = normalizeManningMultiplier(
+      storedManningMultipliers[center] ?? targetState.manningMultipliers[center]
+    );
     nextHorizonShifts[center] = normalizeHorizonShift(storedHorizonShifts[center] ?? targetState.capacityHorizonShifts[center]);
-    nextEffective[center] = getEffectiveCapacityFromSettings(nextMachine[center], nextLaborByDay[center][getWeekdayKey(startOfToday())], nextModes[center]);
+    nextEffective[center] = getEffectiveCapacityFromSettings(
+      nextMachine[center],
+      getPlanningManHoursFromRaw(nextLaborByDay[center][getWeekdayKey(startOfToday())], nextTemporaryManning[center], nextManningMultipliers[center], startOfToday()),
+      nextModes[center]
+    );
   });
 
   targetState.machineCapacities = nextMachine;
   targetState.manHourCapacities = nextLabor;
   targetState.manHoursByDay = nextLaborByDay;
+  targetState.temporaryAdditionalManning = nextTemporaryManning;
+  targetState.manningMultipliers = nextManningMultipliers;
   targetState.capacityModes = nextModes;
   targetState.capacityHorizonShifts = nextHorizonShifts;
   targetState.capacities = nextEffective;
   saveMachineCapacities(targetState.machineCapacities);
   saveManHourCapacities(targetState.manHourCapacities);
   saveManHoursByDay(targetState.manHoursByDay);
+  saveTemporaryAdditionalManning(targetState.temporaryAdditionalManning);
+  saveManningMultipliers(targetState.manningMultipliers);
   saveCapacityModes(targetState.capacityModes);
   saveCapacityHorizonShifts(targetState.capacityHorizonShifts);
 }
@@ -1079,6 +1114,18 @@ function updateManHoursForWeekday(targetState, center, weekday, rawValue) {
   saveManHourCapacities(targetState.manHourCapacities);
 }
 
+function updateTemporaryAdditionalManning(targetState, center, rawValue) {
+  targetState.temporaryAdditionalManning[center] = parseCapacityValue(rawValue, 0);
+  targetState.capacities[center] = getCapacityForCenter(targetState, center);
+  saveTemporaryAdditionalManning(targetState.temporaryAdditionalManning);
+}
+
+function updateManningMultiplier(targetState, center, rawValue) {
+  targetState.manningMultipliers[center] = normalizeManningMultiplier(rawValue);
+  targetState.capacities[center] = getCapacityForCenter(targetState, center);
+  saveManningMultipliers(targetState.manningMultipliers);
+}
+
 function updateCapacityMode(targetState, center, rawValue) {
   targetState.capacityModes[center] = normalizeCapacityMode(rawValue);
   targetState.capacities[center] = getCapacityForCenter(targetState, center);
@@ -1105,13 +1152,22 @@ function getDepartmentCapacitySettings(targetState, center) {
   const machineCapacity = getMachineCapacityPerDay(targetState, center);
   const manHoursByDay = getManHoursByDay(targetState, center);
   const today = startOfToday();
+  const rawManHours = getRawManHoursForDate(targetState, center, today);
   const manHours = getManHoursForDate(targetState, center, today);
   const mode = getCapacityMode(targetState, center);
   const effectiveDailyCapacity = getEffectiveCapacityFromSettings(machineCapacity, manHours, mode);
+  const weeklyManningHours = getWeeklyManningHours(targetState, center);
+  const temporaryManning = getTemporaryAdditionalManning(targetState, center);
+  const manningMultiplier = getManningMultiplier(targetState, center);
   return {
     machineCapacity,
+    rawManHours,
     manHours,
     manHoursByDay,
+    weeklyManningHours,
+    currentManning: weeklyManningHours / 40,
+    temporaryManning,
+    manningMultiplier,
     mode,
     actualConstraint: getActualCapacityConstraint(machineCapacity, manHours, mode),
     effectiveDailyCapacity,
@@ -1133,10 +1189,37 @@ function getManHoursByDay(targetState, center) {
   return normalizeManHoursByDay(targetState.manHoursByDay?.[center], getManHoursPerDay(targetState, center));
 }
 
-function getManHoursForDate(targetState, center, date) {
+function getRawManHoursForDate(targetState, center, date) {
   const weekday = getWeekdayKey(date);
   const schedule = getManHoursByDay(targetState, center);
   return parseCapacityValue(schedule[weekday], DEFAULT_MAN_HOURS_PER_DAY);
+}
+
+function getManHoursForDate(targetState, center, date) {
+  return getPlanningManHoursFromRaw(
+    getRawManHoursForDate(targetState, center, date),
+    getTemporaryAdditionalManning(targetState, center),
+    getManningMultiplier(targetState, center),
+    date
+  );
+}
+
+function getPlanningManHoursFromRaw(rawManHours, temporaryManning, manningMultiplier, date) {
+  return (parseCapacityValue(rawManHours, 0) + getTemporaryManningHoursForDate(temporaryManning, date)) * normalizeManningMultiplier(manningMultiplier);
+}
+
+function getTemporaryManningHoursForDate(temporaryManning, date) {
+  return isWeekdayForCapacity(date) ? parseCapacityValue(temporaryManning, 0) * TEMP_MANNING_HOURS_PER_FTE : 0;
+}
+
+function isWeekdayForCapacity(date) {
+  const day = (isKnownDate(date) ? date : startOfToday()).getDay();
+  return day >= 1 && day <= 5;
+}
+
+function getWeeklyManningHours(targetState, center) {
+  const schedule = getManHoursByDay(targetState, center);
+  return CAPACITY_WEEKDAYS.reduce((sum, day) => sum + parseCapacityValue(schedule[day.key], 0), 0);
 }
 
 function getEffectiveCapacityForDate(targetState, center, date) {
@@ -1162,6 +1245,82 @@ function getRollingEffectiveCapacity(targetState, center, startDate, dayCount) {
 function getAverageEffectiveDailyCapacity(targetState, center, startDate, dayCount) {
   const days = Math.max(0, dayCount);
   return days > 0 ? getRollingEffectiveCapacity(targetState, center, startDate, days) / days : 0;
+}
+
+function getNeededManningForDepartment(targetState, department, horizonDays = targetState.filters.kpiHorizonDays, currentOnly = false) {
+  const days = Math.max(1, Number(horizonDays) || 1);
+  const today = startOfToday();
+  const horizonEnd = addDays(today, days - 1);
+  const demandEnd = addDays(horizonEnd, getCapacityHorizonShift(targetState, department));
+  const dailyDemand = Array.from({ length: days }, () => 0);
+  let totalDemand = 0;
+
+  targetState.jobs.forEach((job) => {
+    const dueDate = isKnownDate(job.shipByDate) ? stripTime(job.shipByDate) : demandEnd;
+    if (dueDate > demandEnd) {
+      return;
+    }
+
+    job.operations
+      .filter(
+        (operation) =>
+          operation.phase !== "complete" &&
+          operation.workCenter === department &&
+          operation.hoursRemaining > 0 &&
+          (!currentOnly || operation.phase === "current")
+      )
+      .forEach((operation) => {
+        const hours = operation.hoursRemaining;
+        const dayIndex = dueDate < today ? 0 : clamp(Math.floor((dueDate - today) / 86400000), 0, days - 1);
+        dailyDemand[dayIndex] += hours;
+        totalDemand += hours;
+      });
+  });
+
+  if (totalDemand <= 0) {
+    return 0;
+  }
+
+  const multiplier = getManningMultiplier(targetState, department);
+  const canClearWithManning = (manning) => {
+    let cumulativeDemand = 0;
+    let cumulativeCapacity = 0;
+    let productiveDays = 0;
+    for (let index = 0; index < dailyDemand.length; index += 1) {
+      const date = addDays(today, index);
+      cumulativeDemand += dailyDemand[index];
+      if (isWeekdayForCapacity(date)) {
+        productiveDays += 1;
+        cumulativeCapacity += manning * TEMP_MANNING_HOURS_PER_FTE * multiplier;
+      }
+      if (productiveDays > 0 && cumulativeDemand - cumulativeCapacity > 0.0001) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const productiveDays = dailyDemand.filter((_, index) => isWeekdayForCapacity(addDays(today, index))).length;
+  if (productiveDays === 0) {
+    return totalDemand / (TEMP_MANNING_HOURS_PER_FTE * multiplier);
+  }
+
+  let low = 0;
+  let high = Math.max(1, totalDemand / TEMP_MANNING_HOURS_PER_FTE);
+  while (!canClearWithManning(high) && high < 1000) {
+    high *= 2;
+  }
+
+  for (let iteration = 0; iteration < 28; iteration += 1) {
+    const middle = (low + high) / 2;
+    if (canClearWithManning(middle)) {
+      high = middle;
+    } else {
+      low = middle;
+    }
+  }
+
+  return high;
 }
 
 function getCalendarDayOffset(startDate, date) {
@@ -1229,6 +1388,14 @@ function getCapacityHorizonShift(targetState, center) {
   return normalizeHorizonShift(targetState.capacityHorizonShifts?.[center]);
 }
 
+function getTemporaryAdditionalManning(targetState, center) {
+  return parseCapacityValue(targetState.temporaryAdditionalManning?.[center], 0);
+}
+
+function getManningMultiplier(targetState, center) {
+  return normalizeManningMultiplier(targetState.manningMultipliers?.[center]);
+}
+
 function getCapacityMode(targetState, center) {
   return normalizeCapacityMode(targetState.capacityModes[center] || getDefaultCapacityMode(center));
 }
@@ -1263,9 +1430,21 @@ function getWeekdayKey(date) {
   return WEEKDAY_KEYS[(isKnownDate(date) ? date : startOfToday()).getDay()];
 }
 
+function getDateForWeekdayKey(weekdayKey) {
+  const index = WEEKDAY_KEYS.indexOf(weekdayKey);
+  const date = new Date(2026, 0, 4 + Math.max(0, index));
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
 function normalizeHorizonShift(value) {
   const numericValue = Number(value);
   return CAPACITY_HORIZON_SHIFT_OPTIONS.includes(numericValue) ? numericValue : 0;
+}
+
+function normalizeManningMultiplier(value) {
+  const parsed = Number.parseFloat(String(value ?? "").trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MANNING_MULTIPLIER;
 }
 
 function getEffectiveCapacityFromSettings(machineCapacity, manHours, mode) {
@@ -1356,6 +1535,22 @@ function saveManHoursByDay(manHoursByDay) {
   saveOperationalSetting("manHoursByDay", MAN_HOURS_BY_DAY_STORAGE_KEY, manHoursByDay);
 }
 
+function loadStoredTemporaryAdditionalManning() {
+  return loadOperationalSetting("temporaryAdditionalManning", TEMPORARY_MANNING_STORAGE_KEY);
+}
+
+function saveTemporaryAdditionalManning(temporaryManning) {
+  saveOperationalSetting("temporaryAdditionalManning", TEMPORARY_MANNING_STORAGE_KEY, temporaryManning);
+}
+
+function loadStoredManningMultipliers() {
+  return loadOperationalSetting("manningMultipliers", MANNING_MULTIPLIER_STORAGE_KEY);
+}
+
+function saveManningMultipliers(manningMultipliers) {
+  saveOperationalSetting("manningMultipliers", MANNING_MULTIPLIER_STORAGE_KEY, manningMultipliers);
+}
+
 function loadStoredCapacityModes() {
   return loadOperationalSetting("capacityModes", CAPACITY_MODE_STORAGE_KEY);
 }
@@ -1394,6 +1589,8 @@ function applyServerOperationalSettings(settings) {
     normalized.machineCapacities = loadStoredObject(MACHINE_CAPACITY_STORAGE_KEY);
     normalized.manHourCapacities = loadStoredObject(MAN_HOURS_STORAGE_KEY);
     normalized.manHoursByDay = loadStoredObject(MAN_HOURS_BY_DAY_STORAGE_KEY);
+    normalized.temporaryAdditionalManning = loadStoredObject(TEMPORARY_MANNING_STORAGE_KEY);
+    normalized.manningMultipliers = loadStoredObject(MANNING_MULTIPLIER_STORAGE_KEY);
     normalized.capacityModes = loadStoredObject(CAPACITY_MODE_STORAGE_KEY);
     normalized.capacityHorizonShifts = loadStoredObject(CAPACITY_HORIZON_SHIFT_STORAGE_KEY);
     normalized.flowLocations = loadStoredObject(FLOW_LOCATION_STORAGE_KEY);
@@ -1405,6 +1602,8 @@ function applyServerOperationalSettings(settings) {
   state.machineCapacities = { ...normalized.machineCapacities };
   state.manHourCapacities = { ...normalized.manHourCapacities };
   state.manHoursByDay = clonePlainObject(normalized.manHoursByDay);
+  state.temporaryAdditionalManning = { ...normalized.temporaryAdditionalManning };
+  state.manningMultipliers = { ...normalized.manningMultipliers };
   state.capacityModes = { ...normalized.capacityModes };
   state.capacityHorizonShifts = { ...normalized.capacityHorizonShifts };
   state.flowLocations = { ...normalized.flowLocations };
@@ -1466,6 +1665,8 @@ function getOperationalSettingsPayload() {
     machineCapacities: clonePlainObject(state.machineCapacities),
     manHourCapacities: clonePlainObject(state.manHourCapacities),
     manHoursByDay: clonePlainObject(state.manHoursByDay),
+    temporaryAdditionalManning: clonePlainObject(state.temporaryAdditionalManning),
+    manningMultipliers: clonePlainObject(state.manningMultipliers),
     capacityModes: clonePlainObject(state.capacityModes),
     capacityHorizonShifts: clonePlainObject(state.capacityHorizonShifts),
     flowLocations: clonePlainObject(state.flowLocations),
@@ -2003,6 +2204,10 @@ function formatDate(date) {
 
 function formatHours(hours) {
   return Number(hours || 0).toFixed(hours >= 10 ? 0 : 1).replace(".0", "");
+}
+
+function formatManning(value) {
+  return Number(value || 0).toFixed(1);
 }
 
 function formatPercent(value) {
@@ -2545,6 +2750,7 @@ function getCapacityViewModel(targetState) {
     const capacity = capacitySettings.effectiveDailyCapacity;
     const planningCapacity = capacitySettings.averageEffectiveDailyCapacity;
     const days = planningCapacity > 0 ? queueHours / planningCapacity : 0;
+    const neededManning = getNeededManningForDepartment(targetState, center, targetState.filters.kpiHorizonDays, false);
 
     return {
       center,
@@ -2555,9 +2761,15 @@ function getCapacityViewModel(targetState) {
       capacity,
       planningCapacity,
       weeklyEffectiveCapacity: capacitySettings.weeklyEffectiveCapacity,
+      weeklyManningHours: capacitySettings.weeklyManningHours,
+      currentManning: capacitySettings.currentManning,
+      neededManning,
       machineCapacity: capacitySettings.machineCapacity,
+      rawManHours: capacitySettings.rawManHours,
       manHours: capacitySettings.manHours,
       manHoursByDay: capacitySettings.manHoursByDay,
+      temporaryManning: capacitySettings.temporaryManning,
+      manningMultiplier: capacitySettings.manningMultiplier,
       capacityMode: capacitySettings.mode,
       actualConstraint: capacitySettings.actualConstraint,
       horizonShift: capacitySettings.horizonShift,
@@ -2716,6 +2928,7 @@ function createDepartmentLoadKpi(department, targetState, today, horizonEnd, hor
   const capacitySettings = getDepartmentCapacitySettings(targetState, department);
   const effectiveDailyCapacity = capacitySettings.effectiveDailyCapacity;
   const horizonShift = getCapacityHorizonShift(targetState, department);
+  const neededManning = getNeededManningForDepartment(targetState, department, horizonDays, currentOnly);
   const demandEnd = addDays(horizonEnd, horizonShift);
   const dailyLoad = Array.from({ length: horizonDays }, (_, index) => {
     const date = addDays(today, index);
@@ -2794,7 +3007,13 @@ function createDepartmentLoadKpi(department, targetState, today, horizonEnd, hor
     openHours,
     capacity,
     machineCapacity: capacitySettings.machineCapacity,
+    rawManHours: capacitySettings.rawManHours,
     manHours: capacitySettings.manHours,
+    weeklyManningHours: capacitySettings.weeklyManningHours,
+    currentManning: capacitySettings.currentManning,
+    neededManning,
+    temporaryManning: capacitySettings.temporaryManning,
+    manningMultiplier: capacitySettings.manningMultiplier,
     capacityMode: capacitySettings.mode,
     actualConstraint: capacitySettings.actualConstraint,
     effectiveDailyCapacity,
@@ -3838,6 +4057,38 @@ function createCapacityDepartmentCard(card, viewModel) {
             </select>
           </div>
           <div class="control-field">
+            <label for="temp-manning-${slugify(card.center)}">Temporary Additional Manning</label>
+            <div class="capacity-input-row capacity-input-row-compact">
+              <input
+                id="temp-manning-${slugify(card.center)}"
+                type="text"
+                inputmode="decimal"
+                autocomplete="off"
+                spellcheck="false"
+                value="${escapeHtml(formatManning(card.temporaryManning))}"
+                data-temp-manning-center="${escapeHtml(card.center)}"
+                data-saved-value="${escapeHtml(formatManning(card.temporaryManning))}"
+              />
+              <button class="button button-secondary" type="button" disabled>FTE</button>
+            </div>
+          </div>
+          <div class="control-field">
+            <label for="manning-multiplier-${slugify(card.center)}">Manning Multiplier</label>
+            <div class="capacity-input-row capacity-input-row-compact">
+              <input
+                id="manning-multiplier-${slugify(card.center)}"
+                type="text"
+                inputmode="decimal"
+                autocomplete="off"
+                spellcheck="false"
+                value="${escapeHtml(formatManning(card.manningMultiplier))}"
+                data-manning-multiplier-center="${escapeHtml(card.center)}"
+                data-saved-value="${escapeHtml(formatManning(card.manningMultiplier))}"
+              />
+              <button class="button button-secondary" type="button" disabled>x</button>
+            </div>
+          </div>
+          <div class="control-field">
             <label for="flow-location-${slugify(card.center)}">Flow Location</label>
             <select id="flow-location-${slugify(card.center)}" data-flow-center="${escapeHtml(card.center)}">
               ${viewModel.flowLocationOptions
@@ -3859,25 +4110,29 @@ function createCapacityDepartmentCard(card, viewModel) {
         </div>
         <div class="capacity-stats">
           <div class="capacity-stat capacity-stat-effective">
-            <span class="capacity-stat-label">Effective Capacity</span>
-            <span class="capacity-stat-value">${formatHours(card.capacity)} hrs/day</span>
-            <small>${formatHours(card.weeklyEffectiveCapacity)} hrs/week</small>
+            <span class="capacity-stat-label">Weekly Manning Hours</span>
+            <span class="capacity-stat-value">${formatHours(card.weeklyManningHours)} hrs</span>
+            <small>Raw scheduled labor</small>
           </div>
           <div class="capacity-stat">
-            <span class="capacity-stat-label">Current Hours</span>
-            <span class="capacity-stat-value">${formatHours(card.currentHours)} hrs</span>
+            <span class="capacity-stat-label">Current Manning</span>
+            <span class="capacity-stat-value">${formatManning(card.currentManning)}</span>
+            <small>${formatHours(card.weeklyManningHours)} / 40</small>
           </div>
           <div class="capacity-stat">
-            <span class="capacity-stat-label">Incoming Hours</span>
-            <span class="capacity-stat-value">${formatHours(card.incomingHours)} hrs</span>
+            <span class="capacity-stat-label">Needed Manning</span>
+            <span class="capacity-stat-value">${formatManning(card.neededManning)}</span>
+            <small>Selected horizon</small>
           </div>
           <div class="capacity-stat">
-            <span class="capacity-stat-label">Total Load</span>
-            <span class="capacity-stat-value">${formatHours(card.queueHours)} hrs</span>
+            <span class="capacity-stat-label">Temp Manning</span>
+            <span class="capacity-stat-value">${formatManning(card.temporaryManning)}</span>
+            <small>${card.temporaryManning > 0 ? `+${formatHours(card.temporaryManning * TEMP_MANNING_HOURS_PER_FTE)} hrs weekdays` : "No temp add"}</small>
           </div>
           <div class="capacity-stat">
-            <span class="capacity-stat-label">Load</span>
-            <span class="capacity-stat-value">${card.planningCapacity > 0 ? formatHours(card.days) : "0"}</span>
+            <span class="capacity-stat-label">Multiplier</span>
+            <span class="capacity-stat-value">${formatManning(card.manningMultiplier)}x</span>
+            <small>Planning only</small>
           </div>
         </div>
         <span class="capacity-mode-pill capacity-mode-${slugify(card.actualConstraint)}">${escapeHtml(formatCapacityModeShort(card.actualConstraint))} Constrained</span>
@@ -3888,6 +4143,7 @@ function createCapacityDepartmentCard(card, viewModel) {
 
 function createCapacityManningDayInput(card, day) {
   const value = card.manHoursByDay?.[day.key] ?? card.manHours;
+  const tempHours = getTemporaryManningHoursForDate(card.temporaryManning, getDateForWeekdayKey(day.key));
   return `
     <label class="capacity-manning-day">
       <span>${escapeHtml(day.label)}</span>
@@ -3902,6 +4158,7 @@ function createCapacityManningDayInput(card, day) {
         data-saved-value="${escapeHtml(String(value))}"
       />
       <small>hrs</small>
+      ${tempHours > 0 ? `<small class="capacity-temp-hours">Temp +${formatHours(tempHours)} hrs</small>` : ""}
     </label>
   `;
 }
@@ -4514,7 +4771,9 @@ function createDepartmentLoadCard(department) {
   const constraintLabel = formatCapacityModeShort(department.actualConstraint || department.capacityMode);
   const capacityTitle = `Effective capacity: ${formatHours(department.capacity)} hrs over horizon. Machine/day: ${formatHours(
     department.machineCapacity
-  )} hrs. Labor/day: ${formatHours(department.manHours)} hrs. Constraint: ${department.actualConstraint || department.capacityMode}. Mode: ${department.capacityMode}. Horizon shift: +${department.horizonShift || 0} days.`;
+  )} hrs. Labor/day: ${formatHours(department.manHours)} hrs. Needed manning: ${formatManning(
+    department.neededManning
+  )}. Constraint: ${department.actualConstraint || department.capacityMode}. Mode: ${department.capacityMode}. Horizon shift: +${department.horizonShift || 0} days.`;
   return `
     <article class="kpi-department-card kpi-status-${department.status}" title="${escapeHtml(capacityTitle)}">
       <div class="kpi-department-head">
@@ -4531,11 +4790,14 @@ function createDepartmentLoadCard(department) {
           <div><dt>Past Due Hours</dt><dd>${formatHours(department.pastDueHours)} hrs</dd></div>
           <div><dt>Overloaded Days</dt><dd>${department.overloadedDays}</dd></div>
           <div><dt>Job Count</dt><dd>${department.jobCount}</dd></div>
+          <div><dt>Needed Manning</dt><dd>${formatManning(department.neededManning)}</dd></div>
         </dl>
       </div>
       <div class="kpi-capacity-context">
         <span>Machine/day: ${formatHours(department.machineCapacity)} hrs</span>
         <span>Labor/day: ${formatHours(department.manHours)} hrs</span>
+        <span>Needed: ${formatManning(department.neededManning)}</span>
+        <span>Multiplier: ${formatManning(department.manningMultiplier)}x</span>
         <span>Constraint: ${escapeHtml(constraintLabel)}</span>
         <span>Shift: +${department.horizonShift || 0} days</span>
       </div>
