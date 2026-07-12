@@ -1321,6 +1321,18 @@ select {
   background: #ef4444;
 }
 
+.kpi-heat-zero-capacity {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(203, 213, 225, 0.38) 0,
+      rgba(203, 213, 225, 0.38) 2px,
+      rgba(51, 65, 85, 0.72) 2px,
+      rgba(51, 65, 85, 0.72) 5px
+    );
+}
+
 .kpi-heat-muted {
   background: rgba(148, 163, 184, 0.18);
 }
@@ -1608,6 +1620,10 @@ select {
   background: linear-gradient(180deg, rgba(127, 29, 29, 0.28) 0%, var(--surface-soft) 100%);
 }
 
+.department-date-column.is-zero-capacity {
+  border-color: rgba(148, 163, 184, 0.34);
+}
+
 .department-date-head {
   position: relative;
   min-height: 58px;
@@ -1633,6 +1649,31 @@ select {
 
 .department-date-column.is-past-due .department-date-fill {
   height: 100%;
+  background: linear-gradient(180deg, rgba(248, 113, 113, 0.34) 0%, rgba(185, 28, 28, 0.42) 100%);
+}
+
+.department-date-column.is-zero-capacity .department-date-fill {
+  height: 100%;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(148, 163, 184, 0.22) 0,
+      rgba(148, 163, 184, 0.22) 5px,
+      rgba(15, 23, 42, 0.34) 5px,
+      rgba(15, 23, 42, 0.34) 10px
+    );
+}
+
+.department-date-column.is-over .department-date-fill,
+.department-date-column.is-past-due .department-date-fill {
+  height: 100%;
+}
+
+.department-date-column.is-over .department-date-fill {
+  background: linear-gradient(180deg, rgba(248, 113, 113, 0.16) 0%, rgba(220, 38, 38, 0.28) 100%);
+}
+
+.department-date-column.is-past-due .department-date-fill {
   background: linear-gradient(180deg, rgba(248, 113, 113, 0.34) 0%, rgba(185, 28, 28, 0.42) 100%);
 }
 

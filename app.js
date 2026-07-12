@@ -1164,6 +1164,67 @@ function getAverageEffectiveDailyCapacity(targetState, center, startDate, dayCou
   return days > 0 ? getRollingEffectiveCapacity(targetState, center, startDate, days) / days : 0;
 }
 
+function getCalendarDayOffset(startDate, date) {
+  return Math.floor((stripTime(date) - stripTime(startDate)) / 86400000) + 1;
+}
+
+function createCapacityAwareQueuePlanner(targetState, center, startDate) {
+  const maxPlanningDays = 730;
+  const scheduleStart = stripTime(startDate);
+  let cursorDate = scheduleStart;
+  let remainingCapacity = getEffectiveCapacityForDate(targetState, center, cursorDate);
+
+  function advanceDay() {
+    cursorDate = addDays(cursorDate, 1);
+    remainingCapacity = getEffectiveCapacityForDate(targetState, center, cursorDate);
+  }
+
+  return function planItem(hours) {
+    let remainingHours = Math.max(0, Number(hours || 0));
+    let start = null;
+    let finish = null;
+    let scannedDays = 0;
+
+    while (remainingHours > 0.0001 && scannedDays < maxPlanningDays) {
+      const dayCapacity = getEffectiveCapacityForDate(targetState, center, cursorDate);
+
+      if (dayCapacity <= 0) {
+        advanceDay();
+        scannedDays += 1;
+        continue;
+      }
+
+      if (remainingCapacity <= 0.0001) {
+        advanceDay();
+        scannedDays += 1;
+        continue;
+      }
+
+      if (!start) {
+        start = cursorDate;
+      }
+
+      const consumed = Math.min(remainingHours, remainingCapacity);
+      remainingHours -= consumed;
+      remainingCapacity -= consumed;
+      finish = cursorDate;
+
+      if (remainingHours > 0.0001 && remainingCapacity <= 0.0001) {
+        advanceDay();
+        scannedDays += 1;
+      }
+    }
+
+    return {
+      startDate: start,
+      finishDate: remainingHours <= 0.0001 ? finish : null,
+      startDay: start ? getCalendarDayOffset(scheduleStart, start) : null,
+      finishDay: remainingHours <= 0.0001 && finish ? getCalendarDayOffset(scheduleStart, finish) : null,
+      hasCapacity: remainingHours <= 0.0001,
+    };
+  };
+}
+
 function getCapacityHorizonShift(targetState, center) {
   return normalizeHorizonShift(targetState.capacityHorizonShifts?.[center]);
 }
@@ -2900,7 +2961,7 @@ function getDepartmentViewerModel(targetState) {
         jobs,
         hours,
         capacity: dayCapacity,
-        overCapacity: dayCapacity > 0 && hours > dayCapacity,
+        overCapacity: hours > dayCapacity,
       };
     });
   const pastDueColumns = dayColumns.filter((day) => day.isPastDue);
@@ -2995,13 +3056,14 @@ function createDepartmentSchedulerModel(targetState, visibleJobs, centerOptions,
   );
 
   const schedulingStartDate = getSchedulingStartDate();
-  let cumulativeHours = 0;
+  const planQueueItem = createCapacityAwareQueuePlanner(targetState, selectedCenter, schedulingStartDate);
   const queueRows = queueItems.map((item) => {
-    const startDay = capacity > 0 ? Math.floor(cumulativeHours / capacity) + 1 : null;
-    const finishDay = capacity > 0 ? Math.floor(Math.max(cumulativeHours + item.hours - 0.0001, 0) / capacity) + 1 : null;
-    const projectedCompletionDate = finishDay ? addWorkingDays(schedulingStartDate, finishDay - 1) : item.job.productionDate;
-    const projectedLate = projectedCompletionDate > stripTime(item.job.shipByDate);
-    cumulativeHours += item.hours;
+    const plan = planQueueItem(item.hours);
+    const projectedCompletionDate = plan.finishDate || null;
+    const projectedLate = projectedCompletionDate ? projectedCompletionDate > stripTime(item.job.shipByDate) : item.hours > 0;
+    const dayLabel = plan.finishDay
+      ? `Day ${plan.startDay}${plan.finishDay > plan.startDay ? ` -> Day ${plan.finishDay}` : ""}`
+      : "No capacity";
 
     return {
       id: `${item.job.key}:${item.operation.key}:${item.queueType}`,
@@ -3011,13 +3073,13 @@ function createDepartmentSchedulerModel(targetState, visibleJobs, centerOptions,
       hours: item.hours,
       focusOperationId: item.operation.key,
       projectedLate,
-      startDay,
-      finishDay,
+      startDay: plan.startDay,
+      finishDay: plan.finishDay,
       metaText: buildMetaText(item.job, item.operation, item.job.productionDateLabel),
       statLabel: item.queueType === "incoming"
         ? `After ${item.arrivalSequenceOffset} prior step${item.arrivalSequenceOffset === 1 ? "" : "s"}`
-        : `Day ${startDay}${finishDay > startDay ? ` -> Day ${finishDay}` : ""}`,
-      dateLabel: formatDate(projectedCompletionDate),
+        : dayLabel,
+      dateLabel: projectedCompletionDate ? formatDate(projectedCompletionDate) : "No capacity",
     };
   });
 
@@ -3027,14 +3089,18 @@ function createDepartmentSchedulerModel(targetState, visibleJobs, centerOptions,
   const currentHours = currentItems.reduce((sum, item) => sum + item.hours, 0);
   const incomingHours = incomingItems.reduce((sum, item) => sum + item.hours, 0);
   const totalHours = queueRows.reduce((sum, row) => sum + row.hours, 0);
-  const projectedDays = capacity > 0 ? totalHours / capacity : 0;
+  const scheduledRows = queueRows.filter((row) => row.finishDay);
+  const lastScheduledRow = scheduledRows[scheduledRows.length - 1] || null;
+  const projectedLoadLabel = lastScheduledRow ? `${lastScheduledRow.finishDay} days` : totalHours > 0 ? "No capacity" : "0 days";
 
   return {
     mode: "department",
     centerLabel: selectedCenter,
     badgeLabel: `${formatHours(capacity)} hrs/day`,
-    hint: projectedLateRows.length
+    hint: projectedLateRows.length && lastProjectedLateRow.finishDay
       ? `This department gets out of lates on Day ${lastProjectedLateRow.finishDay} (${lastProjectedLateRow.dateLabel}) based on projected completion versus ship date.`
+      : projectedLateRows.length
+        ? "This department has work that cannot be projected because no capacity is available in the planning window."
       : "This department has no projected late backlog in its current queue.",
     countLabel: `${queueRows.length} operations`,
     centerOptions,
@@ -3046,7 +3112,7 @@ function createDepartmentSchedulerModel(targetState, visibleJobs, centerOptions,
       { label: "Queue Ops", value: String(queueRows.length) },
       { label: "Current Hours", value: `${formatHours(currentHours)} hrs` },
       { label: "Incoming Hours", value: `${formatHours(incomingHours)} hrs` },
-      { label: "Projected Load", value: `${capacity > 0 ? formatHours(projectedDays) : "0"} days` },
+      { label: "Projected Load", value: projectedLoadLabel },
       {
         label: "Projected Lates",
         value: `${projectedLateRows.length} jobs | ${formatHours(lateHours)} hrs`,
@@ -3054,7 +3120,11 @@ function createDepartmentSchedulerModel(targetState, visibleJobs, centerOptions,
       },
       {
         label: "Late Catchup",
-        value: projectedLateRows.length ? `Clear by Day ${lastProjectedLateRow.finishDay}` : "No projected lates",
+        value: projectedLateRows.length
+          ? lastProjectedLateRow.finishDay
+            ? `Clear by Day ${lastProjectedLateRow.finishDay}`
+            : "No capacity"
+          : "No projected lates",
         late: true,
       },
     ],
@@ -4589,6 +4659,9 @@ function createAttentionRow(item) {
 }
 
 function getDailyLoadTone(day) {
+  if (Number(day.capacity || 0) <= 0) {
+    return "zero-capacity";
+  }
   if (!day.hours && !day.backlogHours) {
     return "muted";
   }
@@ -4614,14 +4687,18 @@ function getKpiIcon(icon) {
 
 function createDepartmentDateColumn(day, maxHours) {
   const fillRatio = Math.min(day.hours / maxHours, 1);
-  const stateClasses = [day.overCapacity ? "is-over" : "", day.isPastDue ? "is-past-due" : ""].filter(Boolean).join(" ");
   const capacity = Number(day.capacity || 0);
+  const stateClasses = [
+    day.overCapacity ? "is-over" : "",
+    day.isPastDue ? "is-past-due" : "",
+    capacity <= 0 ? "is-zero-capacity" : "",
+  ].filter(Boolean).join(" ");
   return `
     <section class="department-date-column${stateClasses ? ` ${stateClasses}` : ""}">
       <div class="department-date-head">
         <span class="department-date-label">${escapeHtml(day.label)}</span>
         <span class="department-date-total">${formatHours(day.hours)} hrs</span>
-        <span class="department-date-capacity">${day.jobs.length} jobs${capacity > 0 ? ` | ${formatHours(capacity)} hrs/day` : ""}</span>
+        <span class="department-date-capacity">${day.jobs.length} jobs | ${formatHours(capacity)} hrs/day</span>
         <span class="department-date-fill" style="--fill:${fillRatio}"></span>
       </div>
       <div class="department-job-list">
