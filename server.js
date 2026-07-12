@@ -167,8 +167,16 @@ app.put("/api/settings", (req, res) => {
   res.json({ settings });
 });
 
-app.use(express.static(__dirname, { extensions: ["html"] }));
+app.use(
+  express.static(__dirname, {
+    extensions: ["html"],
+    etag: false,
+    lastModified: false,
+    setHeaders: setNoCacheHeaders,
+  }),
+);
 app.get("*", (req, res) => {
+  setNoCacheHeaders(res);
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
@@ -189,6 +197,12 @@ function requireAuth(req, res, next) {
     return next();
   }
   return res.status(401).json({ error: "Session required" });
+}
+
+function setNoCacheHeaders(res) {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
 }
 
 function safeCompare(value, expected) {
