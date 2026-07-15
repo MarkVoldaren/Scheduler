@@ -2530,6 +2530,16 @@ body[data-modal-open="true"] {
   min-height: 38px;
 }
 
+.pick-list-print-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.pick-list-print-control select {
+  min-height: 38px;
+}
+
 .pick-list-note {
   margin-top: 6px;
 }

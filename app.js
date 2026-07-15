@@ -3777,7 +3777,15 @@ function createPickListControls(viewModel) {
         <input type="search" value="${escapeHtml(viewModel.search)}" placeholder="Search part, SO/TO, PO, shelf, WO..." data-pick-list-search />
       </label>
       <button class="button button-secondary" type="button" data-pick-list-upload>Reload CSV</button>
-      <button class="button button-secondary" type="button" data-pick-list-print="all">Print All</button>
+      <div class="pick-list-print-control">
+        <label class="sr-only" for="pick-list-print-mode">Print all mode</label>
+        <select id="pick-list-print-mode" data-pick-list-print-mode>
+          <option value="current">Current</option>
+          <option value="sales-order">By Sales Order</option>
+          <option value="customer">By Customer</option>
+        </select>
+        <button class="button button-secondary" type="button" data-pick-list-print="all">Print All</button>
+      </div>
       <button class="button button-primary" type="button" data-pick-list-export="all">Export All</button>
     </section>
   `;
@@ -4349,9 +4357,46 @@ function getPickListRowsForAction(viewModel, groupKey) {
     : [viewModel.groupedRows[groupKey]].filter(Boolean).map((group) => ({ group: group.label, key: group.key, rows: group.rows }));
 }
 
+function getPickListPrintMode() {
+  const selector = refs.pickListRoot.querySelector("[data-pick-list-print-mode]");
+  return selector instanceof HTMLSelectElement ? selector.value : "current";
+}
+
+function getPickListPrintGroups(viewModel, groupKey, printMode = "current") {
+  const dateGroups = getPickListRowsForAction(viewModel, groupKey);
+  if (groupKey !== "all" || printMode === "current") {
+    return dateGroups;
+  }
+
+  const groupBy = printMode === "sales-order"
+    ? (row) => row.soTo || "No Sales Order"
+    : (row) => row.customer || "No Customer";
+  const suffix = printMode === "sales-order" ? "SO" : "Customer";
+
+  return dateGroups.flatMap((dateGroup) => {
+    const bucketMap = new Map();
+    dateGroup.rows.forEach((row) => {
+      const key = groupBy(row);
+      if (!bucketMap.has(key)) {
+        bucketMap.set(key, []);
+      }
+      bucketMap.get(key).push(row);
+    });
+
+    return [...bucketMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([label, rows]) => ({
+        group: `${dateGroup.group} - ${suffix}: ${label}`,
+        key: `${dateGroup.key}:${printMode}:${label}`,
+        rows,
+      }));
+  });
+}
+
 function printPickList(groupKey = "all") {
   const viewModel = getPickListViewModel(state);
-  const groups = getPickListRowsForAction(viewModel, groupKey);
+  const printMode = groupKey === "all" ? getPickListPrintMode() : "current";
+  const groups = getPickListPrintGroups(viewModel, groupKey, printMode);
   const totalRows = groups.reduce((total, group) => total + group.rows.length, 0);
   if (!totalRows) {
     window.alert("No pick list rows are available to print for the current filters.");
@@ -4364,7 +4409,7 @@ function printPickList(groupKey = "all") {
     return;
   }
 
-  printWindow.document.write(buildPickListPrintHtml(viewModel, groups, groupKey));
+  printWindow.document.write(buildPickListPrintHtml(viewModel, groups, groupKey, printMode));
   printWindow.document.close();
   printWindow.focus();
   printWindow.setTimeout(() => {
@@ -4372,7 +4417,7 @@ function printPickList(groupKey = "all") {
   }, 150);
 }
 
-function buildPickListPrintHtml(viewModel, groups, groupKey) {
+function buildPickListPrintHtml(viewModel, groups, groupKey, printMode = "current") {
   const totals = groups.reduce(
     (summary, group) => {
       group.rows.forEach((row) => {
@@ -4386,6 +4431,7 @@ function buildPickListPrintHtml(viewModel, groups, groupKey) {
     { rows: 0, needed: 0, committed: 0, remaining: 0 }
   );
   const printedGroup = groupKey === "all" ? "All Groups" : groups[0]?.group || "Selected Group";
+  const printModeLabel = getPickListPrintModeLabel(printMode);
   const customerLabel =
     viewModel.selectedCustomerDetail || (viewModel.selectedCustomer === "ALL" ? "All Customers" : viewModel.selectedCustomer || "All Customers");
   const dateRange = [viewModel.dateFrom ? `From ${formatPrintDateLabel(viewModel.dateFrom)}` : "", viewModel.dateTo ? `To ${formatPrintDateLabel(viewModel.dateTo)}` : ""]
@@ -4404,7 +4450,7 @@ function buildPickListPrintHtml(viewModel, groups, groupKey) {
     h1 { margin: 0; font-size: 16pt; line-height: 1.05; }
     h2 { margin: 8px 0 3px; padding: 4px 6px; border: 1px solid #cbd5e1; background: #f1f5f9; font-size: 10pt; line-height: 1.1; }
     .print-header { border-bottom: 1.5px solid #111827; padding-bottom: 6px; margin-bottom: 7px; }
-    .print-meta { display: grid; grid-template-columns: 1.2fr 0.8fr 0.9fr 1fr 1.2fr 0.8fr 1.1fr; gap: 3px 9px; margin-top: 5px; color: #374151; }
+    .print-meta { display: grid; grid-template-columns: 1.2fr 0.85fr 0.85fr 0.8fr 0.9fr 1.15fr 0.55fr 1fr; gap: 3px 8px; margin-top: 5px; color: #374151; }
     .print-meta div { min-width: 0; }
     .print-meta span { display: block; color: #6b7280; font-size: 7px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
     .print-meta strong { display: block; color: #111827; font-size: 8.5px; line-height: 1.08; overflow-wrap: normal; }
@@ -4419,7 +4465,7 @@ function buildPickListPrintHtml(viewModel, groups, groupKey) {
     .num, .status, .shelf, .hours, .dept, .wo { white-space: nowrap; }
     .num, .hours { text-align: right; }
     .part { font-weight: 700; overflow-wrap: anywhere; }
-    .po, .operation { overflow-wrap: break-word; word-break: normal; }
+    .customer, .operation { overflow-wrap: break-word; word-break: normal; }
     .operation { font-size: 8px; line-height: 1.1; color: #374151; }
     .muted { color: #6b7280; }
     .status { font-weight: 700; }
@@ -4433,6 +4479,7 @@ function buildPickListPrintHtml(viewModel, groups, groupKey) {
     <div class="print-meta">
       <div><span>Customer</span><strong>${escapeHtml(customerLabel)}</strong></div>
       <div><span>Group</span><strong>${escapeHtml(printedGroup)}</strong></div>
+      <div><span>Print Mode</span><strong>${escapeHtml(printModeLabel)}</strong></div>
       <div><span>Commit</span><strong>${escapeHtml(getPickListCommitmentLabel(viewModel.commitmentFilter))}</strong></div>
       <div><span>Generated</span><strong>${escapeHtml(formatPrintTimestamp(new Date()))}</strong></div>
       <div><span>Source</span><strong>${escapeHtml(viewModel.sourceName || "Shipping CSV")}</strong></div>
@@ -4444,6 +4491,16 @@ function buildPickListPrintHtml(viewModel, groups, groupKey) {
   ${groups.map(createPickListPrintSection).join("")}
 </body>
 </html>`;
+}
+
+function getPickListPrintModeLabel(printMode) {
+  if (printMode === "sales-order") {
+    return "By Sales Order";
+  }
+  if (printMode === "customer") {
+    return "By Customer";
+  }
+  return "Current";
 }
 
 function createPickListPrintSection(group) {
@@ -4464,7 +4521,7 @@ function createPickListPrintSection(group) {
                   <th>Status</th>
                   <th>Shelf</th>
                   <th>SO/TO</th>
-                  <th>PO</th>
+                  <th>Customer</th>
                   <th>WO</th>
                   <th>Dept</th>
                   <th>Op</th>
@@ -4495,7 +4552,7 @@ function createPickListPrintRow(row) {
       <td class="status">${escapeHtml(formatPrintCommitStatus(row.commitmentStatus))}</td>
       <td class="shelf">${escapeHtml(row.shelf || "")}</td>
       <td>${escapeHtml(row.soTo || "")}</td>
-      <td class="po">${escapeHtml(row.poNumber || "")}</td>
+      <td class="customer">${escapeHtml(row.customer || "")}</td>
       <td class="wo">${escapeHtml(getPrintWoLabel(row))}</td>
       <td class="dept">${escapeHtml(row.currentDepartment || "")}</td>
       <td class="operation">${escapeHtml(row.currentOperation || "")}</td>
