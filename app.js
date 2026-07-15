@@ -293,6 +293,27 @@ function bindEvents() {
     setKpiSortBy(state, event.target.value);
     renderKpiSurface();
   });
+  refs.kpiBoardRoot.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+
+    const toggle = event.target.closest("[data-kpi-backlog-toggle]");
+    if (!toggle) {
+      return;
+    }
+
+    const panelId = toggle.getAttribute("aria-controls");
+    const panel = panelId ? document.getElementById(panelId) : null;
+    if (!panel) {
+      return;
+    }
+
+    const shouldOpen = toggle.getAttribute("aria-expanded") !== "true";
+    closeKpiBacklogPanels();
+    toggle.setAttribute("aria-expanded", String(shouldOpen));
+    panel.hidden = !shouldOpen;
+  });
   refs.departmentViewerCenterSelect.addEventListener("change", (event) => {
     setSelectedDepartmentViewerCenter(state, event.target.value);
     renderDepartmentViewerSurface();
@@ -325,8 +346,21 @@ function bindEvents() {
     }
   });
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      const expandedBacklogToggle = document.querySelector('[data-kpi-backlog-toggle][aria-expanded="true"]');
+      if (expandedBacklogToggle instanceof HTMLElement) {
+        closeKpiBacklogPanels();
+        expandedBacklogToggle.focus();
+      }
+    }
+
     if (event.key === "Escape" && !refs.workOrderModal.hidden) {
       closeWorkOrderSchedule();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (event.target instanceof Element && !event.target.closest(".kpi-backlog-control")) {
+      closeKpiBacklogPanels();
     }
   });
   refs.sidebarToggle.addEventListener("click", toggleSidebar);
@@ -2904,7 +2938,7 @@ function getKpiBoardViewModel(targetState) {
     .map((department) => createDepartmentLoadKpi(department, targetState, today, horizonEnd, horizonDays, currentOnly))
     .filter((department) => department.openHours > 0 || department.pastDueHours > 0);
   const sortedDepartments = sortDepartmentKpis(departments, sortBy);
-  const flowGroups = groupDepartmentsByFlowLocation(sortedDepartments);
+  const flowGroups = groupDepartmentsByFlowLocation(sortedDepartments, targetState, today, currentOnly);
   const summary = createDepartmentLoadSummary(sortedDepartments);
   const bottlenecks = sortedDepartments.slice(0, 5);
   const attentionItems = sortedDepartments.map(createDepartmentAttentionItem).filter(Boolean).slice(0, 8);
@@ -3028,11 +3062,80 @@ function createDepartmentLoadKpi(department, targetState, today, horizonEnd, hor
   };
 }
 
-function groupDepartmentsByFlowLocation(departments) {
+function groupDepartmentsByFlowLocation(departments, targetState, today, currentOnly) {
   return FLOW_LOCATION_OPTIONS.map((flowLocation) => ({
     flowLocation,
     departments: departments.filter((department) => department.flowLocation === flowLocation),
-  })).filter((group) => group.departments.length > 0);
+  }))
+    .filter((group) => group.departments.length > 0)
+    .map((group) => ({
+      ...group,
+      backlog: createFlowLocationBacklogSummary(group.departments, targetState, today, currentOnly),
+    }));
+}
+
+function createFlowLocationBacklogSummary(departments, targetState, today, currentOnly) {
+  const departmentNames = new Set(departments.map((department) => department.department));
+  const day20End = addDays(today, 19);
+  const dayBuckets = Array.from({ length: 10 }, (_, index) => {
+    const date = addDays(today, 20 + index);
+    return {
+      dayNumber: 21 + index,
+      date,
+      dateKey: localDateKey(date),
+      dateLabel: formatDayLabel(date),
+      jobKeys: new Set(),
+      jobCount: 0,
+    };
+  });
+  const bucketByDate = new Map(dayBuckets.map((bucket) => [bucket.dateKey, bucket]));
+  const pastDueJobKeys = new Set();
+  const dueThroughDay20JobKeys = new Set();
+
+  targetState.jobs.forEach((job) => {
+    if (job.isComplete || !isKnownDate(job.shipByDate)) {
+      return;
+    }
+
+    const qualifiesForGroup = job.operations.some(
+      (operation) =>
+        operation.phase !== "complete" &&
+        operation.hoursRemaining > 0 &&
+        departmentNames.has(operation.workCenter) &&
+        (!currentOnly || operation.phase === "current")
+    );
+    if (!qualifiesForGroup) {
+      return;
+    }
+
+    const dueDate = stripTime(job.shipByDate);
+    if (dueDate < today) {
+      pastDueJobKeys.add(job.key);
+      return;
+    }
+
+    if (dueDate <= day20End) {
+      dueThroughDay20JobKeys.add(job.key);
+      return;
+    }
+
+    const futureBucket = bucketByDate.get(localDateKey(dueDate));
+    if (futureBucket) {
+      futureBucket.jobKeys.add(job.key);
+    }
+  });
+
+  dayBuckets.forEach((bucket) => {
+    bucket.jobCount = bucket.jobKeys.size;
+    delete bucket.jobKeys;
+  });
+
+  return {
+    pastDueJobCount: pastDueJobKeys.size,
+    dueThroughDay20JobCount: dueThroughDay20JobKeys.size,
+    twentyDayBacklogJobCount: pastDueJobKeys.size + dueThroughDay20JobKeys.size,
+    dayBuckets,
+  };
 }
 
 function createDepartmentLoadSummary(departments) {
@@ -4787,6 +4890,8 @@ function createKpiFlowLegend() {
 }
 
 function createFlowLocationSection(group) {
+  const panelId = `kpi-backlog-${slugify(group.flowLocation)}`;
+  const backlog = group.backlog;
   return `
     <section class="kpi-flow-group kpi-flow-${slugify(group.flowLocation)}" style="--flow-span:${getFlowLocationColumnSpan(group)}">
       <div class="kpi-flow-group-head">
@@ -4795,11 +4900,59 @@ function createFlowLocationSection(group) {
         </div>
         <span class="kpi-flow-count">${group.departments.length} ${group.departments.length === 1 ? "department" : "departments"}</span>
       </div>
+      <div class="kpi-backlog-control">
+        <button
+          class="kpi-backlog-toggle"
+          type="button"
+          data-kpi-backlog-toggle
+          aria-expanded="false"
+          aria-controls="${panelId}"
+        >
+          <span>20-Day Backlog</span>
+          <strong>${backlog.twentyDayBacklogJobCount} ${backlog.twentyDayBacklogJobCount === 1 ? "job" : "jobs"}</strong>
+        </button>
+        <section id="${panelId}" class="kpi-backlog-panel" aria-label="${escapeHtml(group.flowLocation)} backlog details" hidden>
+          <div class="kpi-backlog-panel-head">
+            <div>
+              <span class="kpi-backlog-panel-kicker">${escapeHtml(group.flowLocation)}</span>
+              <h4>Calendar-Day Backlog</h4>
+            </div>
+            <strong>${backlog.twentyDayBacklogJobCount} ${backlog.twentyDayBacklogJobCount === 1 ? "job" : "jobs"}</strong>
+          </div>
+          <div class="kpi-backlog-summary">
+            <div><span>Past Due</span><strong>${backlog.pastDueJobCount}</strong></div>
+            <div><span>Days 1-20</span><strong>${backlog.dueThroughDay20JobCount}</strong></div>
+            <div><span>Total</span><strong>${backlog.twentyDayBacklogJobCount}</strong></div>
+          </div>
+          <div class="kpi-backlog-days" aria-label="Job counts for calendar days 21 through 30">
+            ${backlog.dayBuckets
+              .map(
+                (bucket) => `
+                  <div class="kpi-backlog-day${bucket.jobCount > 0 ? " kpi-backlog-day-active" : ""}">
+                    <span>Day ${bucket.dayNumber}</span>
+                    <small>${escapeHtml(formatDate(bucket.date))}</small>
+                    <strong>${bucket.jobCount}</strong>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        </section>
+      </div>
       <div class="kpi-card-grid">
         ${group.departments.map(createDepartmentLoadCard).join("")}
       </div>
     </section>
   `;
+}
+
+function closeKpiBacklogPanels() {
+  document.querySelectorAll("[data-kpi-backlog-toggle]").forEach((toggle) => {
+    toggle.setAttribute("aria-expanded", "false");
+  });
+  document.querySelectorAll(".kpi-backlog-panel").forEach((panel) => {
+    panel.hidden = true;
+  });
 }
 
 function getFlowLocationColumnSpan(group) {
