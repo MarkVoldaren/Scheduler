@@ -57,6 +57,10 @@
             <span class="sidebar-link-icon">P</span>
             <span class="sidebar-link-label">Pick List</span>
           </button>
+          <button id="view-expedite" class="sidebar-link" type="button" data-view="expedite" aria-pressed="false">
+            <span class="sidebar-link-icon">E</span>
+            <span class="sidebar-link-label">Expedite</span>
+          </button>
         </nav>
 
         <div class="sidebar-footer">
@@ -154,6 +158,21 @@
                 </div>
                 <input id="shipping-csv-input" type="file" accept=".csv" hidden />
                 <div id="pick-list-root" class="pick-list-root"></div>
+              </main>
+            </section>
+
+            <section class="page-view" id="page-expedite" data-page="expedite">
+              <main class="panel panel-primary panel-wide">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-kicker">Expedite Helper</p>
+                    <h2>Production Commitments at Risk</h2>
+                  </div>
+                  <div class="panel-head-meta">
+                    <span class="panel-note">Work orders and combos finishing after uncovered sales-order demand</span>
+                  </div>
+                </div>
+                <div id="expedite-root" class="expedite-root"></div>
               </main>
             </section>
 

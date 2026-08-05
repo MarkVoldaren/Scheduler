@@ -169,6 +169,9 @@ function createInitialState() {
       pickListDateFrom: "",
       pickListDateTo: "",
       pickListSearch: "",
+      expediteSearch: "",
+      expediteCustomer: "ALL",
+      expediteSortBy: "most-late",
     },
   };
 }
@@ -189,14 +192,17 @@ function createRefs() {
     viewDepartments: document.querySelector("#view-departments"),
     viewKpi: document.querySelector("#view-kpi"),
     viewPickList: document.querySelector("#view-pick-list"),
+    viewExpedite: document.querySelector("#view-expedite"),
     viewSequencers: document.querySelector("#view-sequencers"),
     pageCapacity: document.querySelector("#page-capacity"),
     pageDepartments: document.querySelector("#page-departments"),
     pageKpi: document.querySelector("#page-kpi"),
     pagePickList: document.querySelector("#page-pick-list"),
+    pageExpedite: document.querySelector("#page-expedite"),
     pageSequencers: document.querySelector("#page-sequencers"),
     shippingCsvInput: document.querySelector("#shipping-csv-input"),
     pickListRoot: document.querySelector("#pick-list-root"),
+    expediteRoot: document.querySelector("#expedite-root"),
     capacityGrid: document.querySelector("#capacity-grid"),
     kpiDepartmentGroup: document.querySelector("#kpi-department-group"),
     kpiHorizon: document.querySelector("#kpi-horizon"),
@@ -277,6 +283,7 @@ function bindEvents() {
   refs.viewKpi.addEventListener("click", () => switchView("kpi"));
   refs.viewDepartments.addEventListener("click", () => switchView("departments"));
   refs.viewPickList.addEventListener("click", () => switchView("pick-list"));
+  refs.viewExpedite.addEventListener("click", () => switchView("expedite"));
   refs.kpiDepartmentGroup.addEventListener("change", (event) => {
     setKpiDepartmentGroup(state, event.target.value);
     renderKpiSurface();
@@ -542,6 +549,46 @@ function bindEvents() {
       } else {
         openJobDetailByWorkOrder(woButton.dataset.pickListWo);
       }
+    }
+  });
+
+  refs.expediteRoot.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.dataset.expediteSearch === undefined) {
+      return;
+    }
+    state.filters.expediteSearch = target.value.trim().toLowerCase();
+    renderExpediteSurface();
+    const searchInput = refs.expediteRoot.querySelector("[data-expedite-search]");
+    searchInput?.focus();
+    searchInput?.setSelectionRange(searchInput.value.length, searchInput.value.length);
+  });
+
+  refs.expediteRoot.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    if (target.dataset.expediteCustomer !== undefined) {
+      state.filters.expediteCustomer = target.value || "ALL";
+      renderExpediteSurface();
+      return;
+    }
+    if (target.dataset.expediteSort !== undefined) {
+      state.filters.expediteSortBy = ["most-late", "earliest-need", "largest-shortage"].includes(target.value)
+        ? target.value
+        : "most-late";
+      renderExpediteSurface();
+    }
+  });
+
+  refs.expediteRoot.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+    const jobButton = event.target.closest("[data-expedite-job-key]");
+    if (jobButton) {
+      openWorkOrderSchedule(jobButton.dataset.expediteJobKey);
     }
   });
 
@@ -827,6 +874,11 @@ function renderActiveSurface() {
     return;
   }
 
+  if (state.currentView === "expedite") {
+    renderExpediteSurface();
+    return;
+  }
+
   renderSchedulerSurface();
 }
 
@@ -853,6 +905,11 @@ function renderDepartmentViewerSurface() {
 function renderPickListSurface() {
   renderSharedChrome(refs, state);
   renderPickList(refs, getPickListViewModel(state));
+}
+
+function renderExpediteSurface() {
+  renderSharedChrome(refs, state);
+  renderExpediteHelper(refs, getExpediteViewModel(state));
 }
 
 function switchView(view) {
@@ -989,7 +1046,7 @@ function setPartialsOnly(targetState, checked) {
 }
 
 function setCurrentView(targetState, view) {
-  targetState.currentView = ["capacity", "departments", "kpi", "pick-list"].includes(view) ? view : "sequencers";
+  targetState.currentView = ["capacity", "departments", "kpi", "pick-list", "expedite"].includes(view) ? view : "sequencers";
 }
 
 function ensureSelectedSchedulerCenter(targetState) {
@@ -2533,6 +2590,167 @@ function getPickListViewModel(targetState) {
   };
 }
 
+function getExpediteViewModel(targetState) {
+  const scheduleLoaded = targetState.jobs.length > 0;
+  const pickListLoaded = targetState.shippingRows.length > 0;
+  const search = targetState.filters.expediteSearch || "";
+  const selectedCustomer = targetState.filters.expediteCustomer || "ALL";
+  const sortBy = targetState.filters.expediteSortBy || "most-late";
+
+  if (!scheduleLoaded || !pickListLoaded) {
+    return {
+      scheduleLoaded,
+      pickListLoaded,
+      search,
+      selectedCustomer,
+      sortBy,
+      customers: [],
+      items: [],
+      exceptions: [],
+      summary: { expediteJobs: 0, uncoveredQuantity: 0, impactedLines: 0, unmatchedLines: 0 },
+    };
+  }
+
+  const shortageRows = targetState.shippingRows
+    .map((row) => enrichShippingRow(row, targetState.jobs))
+    .filter((row) => row.qtyRemaining > 0);
+  const rowsByJob = new Map();
+  const exceptions = [];
+
+  shortageRows.forEach((row) => {
+    if (!row.match.job) {
+      exceptions.push(createExpediteException(row, row.matchType === "linked-not-found" ? "Linked WO was not found" : "No matching WO or combo"));
+      return;
+    }
+    if (row.match.job.isComplete) {
+      return;
+    }
+    if (!rowsByJob.has(row.match.job.key)) {
+      rowsByJob.set(row.match.job.key, { job: row.match.job, rows: [] });
+    }
+    rowsByJob.get(row.match.job.key).rows.push(row);
+  });
+
+  const allItems = [];
+  let onTimeJobCount = 0;
+  rowsByJob.forEach(({ job, rows }) => {
+    const datedRows = rows.filter((row) => row.shipDate);
+    if (!datedRows.length) {
+      rows.forEach((row) => exceptions.push(createExpediteException(row, "Missing sales-order need date")));
+      return;
+    }
+    if (!isKnownDate(job.shipByDate)) {
+      rows.forEach((row) => exceptions.push(createExpediteException(row, "Missing production end date")));
+      return;
+    }
+
+    const earliestNeedDate = datedRows.reduce(
+      (earliest, row) => (!earliest || stripTime(row.shipDate) < earliest ? stripTime(row.shipDate) : earliest),
+      null
+    );
+    const productionEndDate = stripTime(job.shipByDate);
+    if (productionEndDate <= earliestNeedDate) {
+      onTimeJobCount += 1;
+      return;
+    }
+
+    const currentOperation = getCurrentOperationForMatchedJob(job);
+    allItems.push({
+      job,
+      jobKey: job.key,
+      displayId: job.displayId,
+      typeLabel: job.typeLabel,
+      customer: uniqueValues(rows.map((row) => row.customer)).join(" / "),
+      customerGroup: getCustomerGroupName(rows[0]?.customer),
+      parts: uniqueValues(rows.map((row) => row.partNumber)).join(" / "),
+      salesOrders: uniqueValues(rows.map((row) => row.soTo)).join(" / "),
+      earliestNeedDate,
+      earliestNeedLabel: formatDate(earliestNeedDate),
+      productionEndDate,
+      productionEndLabel: formatDate(productionEndDate),
+      daysLate: Math.max(1, Math.ceil((productionEndDate - earliestNeedDate) / 86400000)),
+      uncoveredQuantity: rows.reduce((sum, row) => sum + Math.max(0, row.qtyRemaining), 0),
+      impactedLineCount: rows.length,
+      currentDepartment: currentOperation?.workCenter || "Not active",
+      currentOperation: currentOperation?.operationName || "No current operation",
+      matchType: rows.some((row) => row.matchType === "linked") ? "linked" : "suggested",
+      possibleMatchCount: Math.max(...rows.map((row) => row.possibleMatchCount || 0), 0),
+      needIsPastDue: earliestNeedDate < startOfToday(),
+    });
+  });
+
+  const customers = [
+    ...new Set([...allItems.map((item) => item.customerGroup), ...exceptions.map((item) => item.customerGroup)].filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b));
+  const activeCustomer = selectedCustomer === "ALL" || customers.includes(selectedCustomer) ? selectedCustomer : "ALL";
+  const filteredItems = allItems
+    .filter((item) => activeCustomer === "ALL" || item.customerGroup === activeCustomer)
+    .filter((item) => !search || createExpediteSearchText(item).includes(search))
+    .sort((a, b) => sortExpediteItems(a, b, sortBy));
+  const filteredExceptions = exceptions
+    .filter((item) => activeCustomer === "ALL" || item.customerGroup === activeCustomer)
+    .filter((item) => !search || item.searchText.includes(search))
+    .sort((a, b) => (a.needDate || MAX_DATE) - (b.needDate || MAX_DATE) || a.partNumber.localeCompare(b.partNumber));
+
+  return {
+    scheduleLoaded,
+    pickListLoaded,
+    search,
+    selectedCustomer: activeCustomer,
+    sortBy,
+    customers,
+    items: filteredItems,
+    exceptions: filteredExceptions,
+    summary: {
+      expediteJobs: filteredItems.length,
+      uncoveredQuantity: filteredItems.reduce((sum, item) => sum + item.uncoveredQuantity, 0),
+      impactedLines: filteredItems.reduce((sum, item) => sum + item.impactedLineCount, 0),
+      unmatchedLines: filteredExceptions.length,
+      onTimeJobs: onTimeJobCount,
+    },
+  };
+}
+
+function createExpediteException(row, reason) {
+  return {
+    id: row.id,
+    reason,
+    customer: row.customer,
+    customerGroup: getCustomerGroupName(row.customer),
+    partNumber: row.partNumber,
+    salesOrder: row.soTo,
+    needDate: row.shipDate,
+    needDateLabel: row.shipDate ? formatDate(row.shipDate) : "Unknown",
+    uncoveredQuantity: Math.max(0, row.qtyRemaining),
+    associatedWo: row.assocPrintWo || row.matchedWo || "Not linked",
+    searchText: [row.customer, row.partNumber, row.soTo, row.assocPrintWo, row.matchedWo, reason].join(" ").toLowerCase(),
+  };
+}
+
+function createExpediteSearchText(item) {
+  return [
+    item.displayId,
+    item.typeLabel,
+    item.customer,
+    item.parts,
+    item.salesOrders,
+    item.currentDepartment,
+    item.currentOperation,
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function sortExpediteItems(a, b, sortBy) {
+  if (sortBy === "earliest-need") {
+    return a.earliestNeedDate - b.earliestNeedDate || b.daysLate - a.daysLate || a.displayId.localeCompare(b.displayId);
+  }
+  if (sortBy === "largest-shortage") {
+    return b.uncoveredQuantity - a.uncoveredQuantity || b.daysLate - a.daysLate || a.displayId.localeCompare(b.displayId);
+  }
+  return b.daysLate - a.daysLate || a.earliestNeedDate - b.earliestNeedDate || a.displayId.localeCompare(b.displayId);
+}
+
 function getShippingCustomers(rows) {
   return [...new Set(rows.map((row) => getCustomerGroupName(row.customer)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
@@ -3732,6 +3950,7 @@ function renderSharedChrome(targetRefs, targetState) {
     { id: "departments", button: targetRefs.viewDepartments, page: targetRefs.pageDepartments },
     { id: "kpi", button: targetRefs.viewKpi, page: targetRefs.pageKpi },
     { id: "pick-list", button: targetRefs.viewPickList, page: targetRefs.pagePickList },
+    { id: "expedite", button: targetRefs.viewExpedite, page: targetRefs.pageExpedite },
     { id: "sequencers", button: targetRefs.viewSequencers, page: targetRefs.pageSequencers },
   ];
 
@@ -3800,6 +4019,151 @@ function renderPickList(targetRefs, viewModel) {
   `;
 
   targetRefs.pickListRoot.replaceChildren(createFragment(markup));
+}
+
+function renderExpediteHelper(targetRefs, viewModel) {
+  if (!viewModel.pickListLoaded || !viewModel.scheduleLoaded) {
+    const message = !viewModel.pickListLoaded
+      ? "Load a Pick List CSV to identify uncovered sales-order demand."
+      : "Load a work-center schedule CSV to compare production end dates.";
+    targetRefs.expediteRoot.innerHTML = createEmptyState(message);
+    return;
+  }
+
+  const markup = `
+    <section class="expedite-controls">
+      <div class="control-field">
+        <label for="expedite-customer">Customer Group</label>
+        <select id="expedite-customer" data-expedite-customer>
+          <option value="ALL">All Customer Groups</option>
+          ${viewModel.customers
+            .map(
+              (customer) =>
+                `<option value="${escapeHtml(customer)}"${viewModel.selectedCustomer === customer ? " selected" : ""}>${escapeHtml(customer)}</option>`
+            )
+            .join("")}
+        </select>
+      </div>
+      <label class="control-field">
+        <span>Search</span>
+        <input type="search" value="${escapeHtml(viewModel.search)}" placeholder="WO, combo, part, customer, SO..." data-expedite-search />
+      </label>
+      <div class="control-field">
+        <label for="expedite-sort">Sort By</label>
+        <select id="expedite-sort" data-expedite-sort>
+          <option value="most-late"${viewModel.sortBy === "most-late" ? " selected" : ""}>Most Days Late</option>
+          <option value="earliest-need"${viewModel.sortBy === "earliest-need" ? " selected" : ""}>Earliest Need Date</option>
+          <option value="largest-shortage"${viewModel.sortBy === "largest-shortage" ? " selected" : ""}>Largest Uncovered Qty</option>
+        </select>
+      </div>
+      <div class="expedite-rule-note">
+        <span>Expedite Rule</span>
+        <strong>Production End &gt; Earliest Uncovered Need</strong>
+      </div>
+    </section>
+    <section class="expedite-summary">
+      ${createExpediteSummaryCard("Jobs to Expedite", viewModel.summary.expediteJobs, "WO/combo count", "danger")}
+      ${createExpediteSummaryCard("Uncovered Quantity", formatHours(viewModel.summary.uncoveredQuantity), "across at-risk lines", "warning")}
+      ${createExpediteSummaryCard("Impacted Pick Lines", viewModel.summary.impactedLines, "rolled into WO/combo rows", "accent")}
+      ${createExpediteSummaryCard("Needs WO Link", viewModel.summary.unmatchedLines, "shortage exceptions", viewModel.summary.unmatchedLines ? "warning" : "accent")}
+    </section>
+    ${createExpediteRiskSection(viewModel.items)}
+    ${viewModel.exceptions.length ? createExpediteExceptionSection(viewModel.exceptions) : ""}
+  `;
+  targetRefs.expediteRoot.replaceChildren(createFragment(markup));
+}
+
+function createExpediteSummaryCard(label, value, note, tone) {
+  return `
+    <div class="expedite-summary-card expedite-tone-${tone}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(String(value))}</strong>
+      <small>${escapeHtml(note)}</small>
+    </div>
+  `;
+}
+
+function createExpediteRiskSection(items) {
+  return `
+    <section class="expedite-section expedite-risk-section">
+      <div class="expedite-section-head">
+        <div>
+          <span class="panel-kicker">Action Queue</span>
+          <h3>Production Commitments Requiring Expedite</h3>
+        </div>
+        <span class="expedite-count">${items.length} ${items.length === 1 ? "job" : "jobs"}</span>
+      </div>
+      ${
+        items.length
+          ? `<div class="expedite-table-scroll">
+              <table class="expedite-table">
+                <thead>
+                  <tr>
+                    <th>Priority</th><th>WO / Combo</th><th>Customer</th><th>Part</th><th>Earliest Uncovered Need</th>
+                    <th>Production End</th><th>Late</th><th>Uncovered</th><th>Sales Order</th><th>Current Step</th><th>Match</th>
+                  </tr>
+                </thead>
+                <tbody>${items.map(createExpediteRiskRow).join("")}</tbody>
+              </table>
+            </div>`
+          : `<p class="expedite-empty">No matched production jobs finish after their earliest uncovered sales-order need date.</p>`
+      }
+    </section>
+  `;
+}
+
+function createExpediteRiskRow(item) {
+  const matchLabel = item.matchType === "linked" ? "Linked" : item.possibleMatchCount > 1 ? `Suggested (${item.possibleMatchCount})` : "Suggested";
+  return `
+    <tr class="${item.needIsPastDue ? "expedite-row-critical" : ""}">
+      <td><span class="expedite-priority ${item.needIsPastDue ? "is-critical" : "is-late"}">${item.needIsPastDue ? "Past Due Need" : "Late"}</span></td>
+      <td>
+        <button class="expedite-job-link" type="button" data-expedite-job-key="${escapeHtml(item.jobKey)}">${escapeHtml(item.displayId)}</button>
+        <small>${escapeHtml(item.typeLabel)}</small>
+      </td>
+      <td>${escapeHtml(item.customer)}</td>
+      <td>${escapeHtml(item.parts || "No part")}</td>
+      <td><strong>${escapeHtml(item.earliestNeedLabel)}</strong><small>${item.impactedLineCount} ${item.impactedLineCount === 1 ? "pick line" : "pick lines"}</small></td>
+      <td><strong>${escapeHtml(item.productionEndLabel)}</strong></td>
+      <td><strong class="expedite-days-late">${item.daysLate} ${item.daysLate === 1 ? "day" : "days"}</strong></td>
+      <td>${escapeHtml(formatHours(item.uncoveredQuantity))}</td>
+      <td>${escapeHtml(item.salesOrders || "Not listed")}</td>
+      <td><strong>${escapeHtml(item.currentDepartment)}</strong><small>${escapeHtml(item.currentOperation)}</small></td>
+      <td><span class="expedite-match expedite-match-${item.matchType}">${escapeHtml(matchLabel)}</span></td>
+    </tr>
+  `;
+}
+
+function createExpediteExceptionSection(items) {
+  return `
+    <section class="expedite-section expedite-exception-section">
+      <div class="expedite-section-head">
+        <div>
+          <span class="panel-kicker">Data Exceptions</span>
+          <h3>Uncovered Demand Needing a WO Link</h3>
+        </div>
+        <span class="expedite-count">${items.length} ${items.length === 1 ? "line" : "lines"}</span>
+      </div>
+      <div class="expedite-table-scroll">
+        <table class="expedite-table expedite-exception-table">
+          <thead><tr><th>Reason</th><th>Customer</th><th>Part</th><th>Sales Order</th><th>Need Date</th><th>Uncovered</th><th>Associated WO</th></tr></thead>
+          <tbody>
+            ${items
+              .map(
+                (item) => `
+                  <tr>
+                    <td><span class="expedite-priority is-warning">${escapeHtml(item.reason)}</span></td>
+                    <td>${escapeHtml(item.customer)}</td><td>${escapeHtml(item.partNumber)}</td><td>${escapeHtml(item.salesOrder || "Not listed")}</td>
+                    <td>${escapeHtml(item.needDateLabel)}</td><td>${escapeHtml(formatHours(item.uncoveredQuantity))}</td><td>${escapeHtml(item.associatedWo)}</td>
+                  </tr>
+                `
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
 }
 
 function createPickListUploadCard() {
