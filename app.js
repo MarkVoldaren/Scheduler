@@ -2619,7 +2619,7 @@ function getExpediteViewModel(targetState) {
 
   shortageRows.forEach((row) => {
     if (!row.match.job) {
-      exceptions.push(createExpediteException(row, row.matchType === "linked-not-found" ? "Linked WO was not found" : "No matching WO or combo"));
+      addExpediteException(exceptions, row, row.matchType === "linked-not-found" ? "Linked WO was not found" : "No matching WO or combo");
       return;
     }
     if (row.match.job.isComplete) {
@@ -2636,11 +2636,11 @@ function getExpediteViewModel(targetState) {
   rowsByJob.forEach(({ job, rows }) => {
     const datedRows = rows.filter((row) => row.shipDate);
     if (!datedRows.length) {
-      rows.forEach((row) => exceptions.push(createExpediteException(row, "Missing sales-order need date")));
+      rows.forEach((row) => addExpediteException(exceptions, row, "Missing sales-order need date"));
       return;
     }
     if (!isKnownDate(job.shipByDate)) {
-      rows.forEach((row) => exceptions.push(createExpediteException(row, "Missing production end date")));
+      rows.forEach((row) => addExpediteException(exceptions, row, "Missing production end date"));
       return;
     }
 
@@ -2711,6 +2711,12 @@ function getExpediteViewModel(targetState) {
   };
 }
 
+function addExpediteException(exceptions, row, reason) {
+  if (!isOutsourcedShippingRow(row)) {
+    exceptions.push(createExpediteException(row, reason));
+  }
+}
+
 function createExpediteException(row, reason) {
   return {
     id: row.id,
@@ -2725,6 +2731,10 @@ function createExpediteException(row, reason) {
     associatedWo: row.assocPrintWo || row.matchedWo || "Not linked",
     searchText: [row.customer, row.partNumber, row.soTo, row.assocPrintWo, row.matchedWo, reason].join(" ").toLowerCase(),
   };
+}
+
+function isOutsourcedShippingRow(row) {
+  return String(row?.outsourcedSo || "").trim().toLowerCase() === "outsourced";
 }
 
 function createExpediteSearchText(item) {
@@ -4322,8 +4332,9 @@ function createPickListSection(group) {
 }
 
 function createPickListRow(row) {
-  const outsourcedTag =
-    row.outsourcedSo.toLowerCase() === "outsourced" ? `<span class="pick-list-os-tag" title="${escapeHtml(row.outsourcedSo)}">OS</span>` : "";
+  const outsourcedTag = isOutsourcedShippingRow(row)
+    ? `<span class="pick-list-os-tag" title="${escapeHtml(row.outsourcedSo)}">OS</span>`
+    : "";
   return `
     <tr class="pick-list-row pick-list-commit-${slugify(row.commitmentStatus)}">
       <td>${escapeHtml(row.shipDateLabel)}</td>
