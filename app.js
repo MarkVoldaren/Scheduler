@@ -1991,12 +1991,17 @@ function normalizeShippingRow(row, index) {
 
   const qtyNeeded = parseShippingQuantity(row["Qty Needed"]);
   const qtyCommitted = parseShippingQuantity(row["Qty Committed"]);
-  const shipDate = parseShippingDate(row["Ship Date"]);
+  const originalShipDate = parseShippingDate(row["Ship Date"]);
+  const accelerationDate = parseShippingDate(row["Acceleration Date"]);
+  const shipDate = accelerationDate || originalShipDate;
 
   return {
     id: `shipping-${index}`,
     shipDate,
     shipDateLabel: shipDate ? formatDate(shipDate) : "Unknown",
+    originalShipDate,
+    accelerationDate,
+    isAccelerated: Boolean(accelerationDate),
     poNumber: String(row["P O #"] || "").trim(),
     soTo: String(row["SO / TO"] || "").trim(),
     partNumber: String(row["Part #"] || "").trim(),
@@ -2644,10 +2649,19 @@ function getExpediteViewModel(targetState) {
       return;
     }
 
-    const earliestNeedDate = datedRows.reduce(
-      (earliest, row) => (!earliest || stripTime(row.shipDate) < earliest ? stripTime(row.shipDate) : earliest),
+    const earliestNeedRow = datedRows.reduce(
+      (earliest, row) => {
+        if (!earliest || stripTime(row.shipDate) < stripTime(earliest.shipDate)) {
+          return row;
+        }
+        if (stripTime(row.shipDate).getTime() === stripTime(earliest.shipDate).getTime() && row.isAccelerated && !earliest.isAccelerated) {
+          return row;
+        }
+        return earliest;
+      },
       null
     );
+    const earliestNeedDate = stripTime(earliestNeedRow.shipDate);
     const productionEndDate = stripTime(job.shipByDate);
     if (productionEndDate <= earliestNeedDate) {
       onTimeJobCount += 1;
@@ -2666,6 +2680,8 @@ function getExpediteViewModel(targetState) {
       salesOrders: uniqueValues(rows.map((row) => row.soTo)).join(" / "),
       earliestNeedDate,
       earliestNeedLabel: formatDate(earliestNeedDate),
+      earliestNeedIsAccelerated: earliestNeedRow.isAccelerated,
+      earliestNeedOriginalLabel: earliestNeedRow.originalShipDate ? formatDate(earliestNeedRow.originalShipDate) : "Unknown",
       productionEndDate,
       productionEndLabel: formatDate(productionEndDate),
       daysLate: Math.max(1, Math.ceil((productionEndDate - earliestNeedDate) / 86400000)),
@@ -2727,6 +2743,8 @@ function createExpediteException(row, reason) {
     salesOrder: row.soTo,
     needDate: row.shipDate,
     needDateLabel: row.shipDate ? formatDate(row.shipDate) : "Unknown",
+    needDateIsAccelerated: row.isAccelerated,
+    originalNeedDateLabel: row.originalShipDate ? formatDate(row.originalShipDate) : "Unknown",
     uncoveredQuantity: Math.max(0, row.qtyRemaining),
     associatedWo: row.assocPrintWo || row.matchedWo || "Not linked",
     searchText: [row.customer, row.partNumber, row.soTo, row.assocPrintWo, row.matchedWo, reason].join(" ").toLowerCase(),
@@ -4133,7 +4151,7 @@ function createExpediteRiskRow(item) {
       </td>
       <td>${escapeHtml(item.customer)}</td>
       <td>${escapeHtml(item.parts || "No part")}</td>
-      <td><strong>${escapeHtml(item.earliestNeedLabel)}</strong><small>${item.impactedLineCount} ${item.impactedLineCount === 1 ? "pick line" : "pick lines"}</small></td>
+      <td>${createEffectiveDateMarkup(item.earliestNeedLabel, item.earliestNeedIsAccelerated, item.earliestNeedOriginalLabel)}<small>${item.impactedLineCount} ${item.impactedLineCount === 1 ? "pick line" : "pick lines"}</small></td>
       <td><strong>${escapeHtml(item.productionEndLabel)}</strong></td>
       <td><strong class="expedite-days-late">${item.daysLate} ${item.daysLate === 1 ? "day" : "days"}</strong></td>
       <td>${escapeHtml(formatHours(item.uncoveredQuantity))}</td>
@@ -4164,7 +4182,7 @@ function createExpediteExceptionSection(items) {
                   <tr>
                     <td><span class="expedite-priority is-warning">${escapeHtml(item.reason)}</span></td>
                     <td>${escapeHtml(item.customer)}</td><td>${escapeHtml(item.partNumber)}</td><td>${escapeHtml(item.salesOrder || "Not listed")}</td>
-                    <td>${escapeHtml(item.needDateLabel)}</td><td>${escapeHtml(formatHours(item.uncoveredQuantity))}</td><td>${escapeHtml(item.associatedWo)}</td>
+                    <td>${createEffectiveDateMarkup(item.needDateLabel, item.needDateIsAccelerated, item.originalNeedDateLabel)}</td><td>${escapeHtml(formatHours(item.uncoveredQuantity))}</td><td>${escapeHtml(item.associatedWo)}</td>
                   </tr>
                 `
               )
@@ -4304,7 +4322,7 @@ function createPickListSection(group) {
               <table class="pick-list-table">
                 <thead>
                   <tr>
-                    <th>Ship Date</th>
+                    <th>Effective Date</th>
                     <th>Part #</th>
                     <th>Customer</th>
                     <th>SO / TO</th>
@@ -4336,8 +4354,12 @@ function createPickListRow(row) {
     ? `<span class="pick-list-os-tag" title="${escapeHtml(row.outsourcedSo)}">OS</span>`
     : "";
   return `
-    <tr class="pick-list-row pick-list-commit-${slugify(row.commitmentStatus)}">
-      <td>${escapeHtml(row.shipDateLabel)}</td>
+    <tr class="pick-list-row pick-list-commit-${slugify(row.commitmentStatus)}${row.isAccelerated ? " pick-list-row-accelerated" : ""}">
+      <td class="pick-list-date-cell">${createEffectiveDateMarkup(
+        row.shipDateLabel,
+        row.isAccelerated,
+        row.originalShipDate ? formatDate(row.originalShipDate) : "Unknown"
+      )}</td>
       <td><span class="pick-list-part"><strong>${escapeHtml(row.partNumber)}</strong>${outsourcedTag}</span></td>
       <td>${escapeHtml(row.customer)}</td>
       <td>${escapeHtml(row.soTo)}</td>
@@ -4359,6 +4381,19 @@ function createPickListRow(row) {
 
 function createCommitStatusBadge(status) {
   return `<span class="pick-list-status pick-list-status-${slugify(status)}">${escapeHtml(status)}</span>`;
+}
+
+function createEffectiveDateMarkup(dateLabel, isAccelerated, originalDateLabel) {
+  if (!isAccelerated) {
+    return `<strong>${escapeHtml(dateLabel || "Unknown")}</strong>`;
+  }
+  return `
+    <span class="pick-list-effective-date">
+      <strong>${escapeHtml(dateLabel || "Unknown")}</strong>
+      <span class="pick-list-accelerated-badge">Accelerated</span>
+    </span>
+    <small class="pick-list-original-date">Original: ${escapeHtml(originalDateLabel || "Unknown")}</small>
+  `;
 }
 
 function createPickListMatchCell(row) {
@@ -4948,6 +4983,9 @@ function buildPickListPrintHtml(viewModel, groups, groupKey, printMode = "curren
     .muted { color: #6b7280; }
     .status { font-weight: 700; }
     .wo { font-weight: 700; }
+    tr.accelerated td { background: #fff7d6; border-color: #d97706; }
+    .accelerated-label { display: block; width: fit-content; margin-top: 2px; border: 1px solid #b45309; border-radius: 999px; padding: 1px 4px; color: #92400e; font-size: 6.5px; line-height: 1.1; text-transform: uppercase; }
+    .original-date { display: block; margin-top: 2px; color: #6b7280; font-size: 6.5px; white-space: nowrap; }
     .no-print-rows { padding: 6px; border: 1px solid #cbd5e1; color: #6b7280; }
   </style>
 </head>
@@ -4991,7 +5029,7 @@ function createPickListPrintSection(group) {
               ${getPickListPrintColgroup()}
               <thead>
                 <tr>
-                  <th>Date</th>
+                  <th>Need Date</th>
                   <th>Part</th>
                   <th>Need</th>
                   <th>Com</th>
@@ -5020,9 +5058,15 @@ function getPickListPrintColgroup() {
 }
 
 function createPickListPrintRow(row) {
+  const effectiveDate = formatPrintShipDate(row.shipDate) || row.shipDateLabel || "";
+  const originalDate = formatPrintShipDate(row.originalShipDate) || "Unknown";
   return `
-    <tr>
-      <td>${escapeHtml(formatPrintShipDate(row.shipDate) || row.shipDateLabel || "")}</td>
+    <tr class="${row.isAccelerated ? "accelerated" : ""}">
+      <td>${escapeHtml(effectiveDate)}${
+        row.isAccelerated
+          ? `<strong class="accelerated-label">Accelerated</strong><small class="original-date">Original: ${escapeHtml(originalDate)}</small>`
+          : ""
+      }</td>
       <td class="part">${escapeHtml(row.partNumber || "")}</td>
       <td class="num">${escapeHtml(formatPrintNumber(row.qtyNeeded))}</td>
       <td class="num">${escapeHtml(formatPrintNumber(row.qtyCommitted))}</td>
@@ -5111,7 +5155,10 @@ function formatPrintNumber(value) {
 function createPickListExportRow(group, row) {
   return {
     Group: group,
-    "Ship Date": row.shipDateLabel,
+    "Effective Date": row.shipDateLabel,
+    "Acceleration Date": row.accelerationDate ? formatDate(row.accelerationDate) : "",
+    "Original Ship Date": row.originalShipDate ? formatDate(row.originalShipDate) : "",
+    Accelerated: row.isAccelerated ? "Yes" : "No",
     Customer: row.customer,
     "Part #": row.partNumber,
     "SO / TO": row.soTo,
