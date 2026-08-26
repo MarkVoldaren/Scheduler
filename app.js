@@ -166,6 +166,7 @@ function createInitialState() {
       selectedPickListCustomer: "",
       selectedPickListCustomerDetail: "",
       pickListCommitmentFilter: "all",
+      pickListAcceleratedOnly: false,
       pickListDateFrom: "",
       pickListDateTo: "",
       pickListSearch: "",
@@ -497,6 +498,12 @@ function bindEvents() {
 
     if (target.dataset.pickListCustomerDetail !== undefined) {
       setSelectedPickListCustomerDetail(state, target.value);
+      renderPickListSurface();
+      return;
+    }
+
+    if (target.dataset.pickListAcceleratedOnly !== undefined) {
+      setPickListAcceleratedOnly(state, target.checked);
       renderPickListSurface();
       return;
     }
@@ -982,6 +989,10 @@ function setSelectedPickListCustomerDetail(targetState, value) {
 
 function setPickListCommitmentFilter(targetState, value) {
   targetState.filters.pickListCommitmentFilter = ["all", "fully", "not-fully"].includes(value) ? value : "all";
+}
+
+function setPickListAcceleratedOnly(targetState, value) {
+  targetState.filters.pickListAcceleratedOnly = Boolean(value);
 }
 
 function setPickListDateFrom(targetState, value) {
@@ -2544,6 +2555,7 @@ function getPickListViewModel(targetState) {
   const customerDetails = getShippingCustomerDetails(targetState.shippingRows, selectedCustomer);
   const selectedCustomerDetail = targetState.filters.selectedPickListCustomerDetail || "";
   const commitmentFilter = targetState.filters.pickListCommitmentFilter || "all";
+  const acceleratedOnly = Boolean(targetState.filters.pickListAcceleratedOnly);
   const dateFrom = targetState.filters.pickListDateFrom || "";
   const dateTo = targetState.filters.pickListDateTo || "";
   const search = targetState.filters.pickListSearch || "";
@@ -2558,6 +2570,7 @@ function getPickListViewModel(targetState) {
       selectedCustomer,
       selectedCustomerDetail,
       commitmentFilter,
+      acceleratedOnly,
       dateFrom,
       dateTo,
       search,
@@ -2569,7 +2582,9 @@ function getPickListViewModel(targetState) {
 
   const enrichedRows = targetState.shippingRows
     .map((row) => enrichShippingRow(row, targetState.jobs))
-    .filter((row) => matchesPickListFilters(row, selectedCustomer, selectedCustomerDetail, commitmentFilter, dateFrom, dateTo, search))
+    .filter((row) =>
+      matchesPickListFilters(row, selectedCustomer, selectedCustomerDetail, commitmentFilter, acceleratedOnly, dateFrom, dateTo, search)
+    )
     .sort(sortPickListRows);
   const groupedRows = groupPickListRowsByShipDate(enrichedRows);
 
@@ -2581,6 +2596,7 @@ function getPickListViewModel(targetState) {
     selectedCustomer,
     selectedCustomerDetail,
     commitmentFilter,
+    acceleratedOnly,
     dateFrom,
     dateTo,
     search,
@@ -2835,7 +2851,7 @@ function getCommitStatus(row) {
   return "Uncommitted";
 }
 
-function matchesPickListFilters(row, selectedCustomer, selectedCustomerDetail, commitmentFilter, dateFrom, dateTo, search) {
+function matchesPickListFilters(row, selectedCustomer, selectedCustomerDetail, commitmentFilter, acceleratedOnly, dateFrom, dateTo, search) {
   if (selectedCustomer && selectedCustomer !== "ALL" && getCustomerGroupName(row.customer) !== selectedCustomer) {
     return false;
   }
@@ -2849,6 +2865,10 @@ function matchesPickListFilters(row, selectedCustomer, selectedCustomerDetail, c
   }
 
   if (commitmentFilter === "not-fully" && row.qtyNeeded === row.qtyCommitted) {
+    return false;
+  }
+
+  if (acceleratedOnly && !row.isAccelerated) {
     return false;
   }
 
@@ -4259,6 +4279,15 @@ function createPickListControls(viewModel) {
           <option value="not-fully"${viewModel.commitmentFilter === "not-fully" ? " selected" : ""}>Not fully committed only</option>
         </select>
       </div>
+      <label class="pick-list-accelerated-filter" for="pick-list-accelerated-only">
+        <input
+          id="pick-list-accelerated-only"
+          type="checkbox"
+          data-pick-list-accelerated-only
+          ${viewModel.acceleratedOnly ? "checked" : ""}
+        />
+        <span>Accelerated only</span>
+      </label>
       <div class="control-field">
         <label for="pick-list-date-from">From</label>
         <input id="pick-list-date-from" type="date" value="${escapeHtml(viewModel.dateFrom)}" data-pick-list-date-from />

@@ -2691,6 +2691,29 @@ body[data-modal-open="true"] {
   min-height: 38px;
 }
 
+.pick-list-accelerated-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--panel-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warning) 9%, var(--input-bg));
+  color: var(--text-strong);
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 0.76rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.pick-list-accelerated-filter input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--warning);
+  cursor: pointer;
+}
+
 .pick-list-print-control {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
