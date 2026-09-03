@@ -189,6 +189,8 @@ function createRefs() {
     emptyStateTemplate: document.querySelector("#empty-state-template"),
     themeToggle: document.querySelector("#theme-toggle"),
     sourcePill: document.querySelector("#source-pill"),
+    workCenterUploadedAt: document.querySelector("#work-center-uploaded-at"),
+    pickListUploadedAt: document.querySelector("#pick-list-uploaded-at"),
     viewCapacity: document.querySelector("#view-capacity"),
     viewDepartments: document.querySelector("#view-departments"),
     viewKpi: document.querySelector("#view-kpi"),
@@ -3992,6 +3994,8 @@ function uniqueValues(values) {
 
 function renderSharedChrome(targetRefs, targetState) {
   targetRefs.sourcePill.textContent = targetState.sourceName;
+  renderCsvUploadMetadata(targetRefs.workCenterUploadedAt, targetState.activeCsvMeta.workCenter);
+  renderCsvUploadMetadata(targetRefs.pickListUploadedAt, targetState.activeCsvMeta.pickList);
 
   const views = [
     { id: "capacity", button: targetRefs.viewCapacity, page: targetRefs.pageCapacity },
@@ -4008,6 +4012,33 @@ function renderSharedChrome(targetRefs, targetState) {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+}
+
+function renderCsvUploadMetadata(element, metadata) {
+  const formatted = formatCentralUploadTime(metadata?.uploadedAt);
+  element.textContent = formatted;
+  element.title = metadata?.uploadedAt ? `Uploaded ${formatted} (${metadata.uploadedAt})` : "No CSV has been uploaded";
+}
+
+function formatCentralUploadTime(value) {
+  if (!value) {
+    return "Not uploaded";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Not uploaded";
+  }
+
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+  return `${formatted} CT`;
 }
 
 function renderScheduler(targetRefs, viewModel) {
