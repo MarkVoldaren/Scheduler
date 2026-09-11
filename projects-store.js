@@ -18,10 +18,13 @@ function createProjectsStore(db, getSource) {
       last_seen_at TEXT NOT NULL, UNIQUE(project_id, type, identifier)
     );
   `);
+  if (!db.prepare("PRAGMA table_info(projects)").all().some(column => column.name === "notes")) {
+    db.exec("ALTER TABLE projects ADD COLUMN notes TEXT NOT NULL DEFAULT ''");
+  }
   function project(id) {
     const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
     if (!row) fail(404, "Project was not found.");
-    return { id: row.id, name: row.name, customer: row.customer, targetDate: row.target_date, archived: Boolean(row.archived), revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at };
+    return { id: row.id, name: row.name, customer: row.customer, notes: row.notes, targetDate: row.target_date, archived: Boolean(row.archived), revision: row.revision, createdAt: row.created_at, updatedAt: row.updated_at };
   }
   function members(id) {
     return db.prepare("SELECT * FROM project_members WHERE project_id = ? ORDER BY id").all(id).map(row => ({ id: row.id, type: row.type, identifier: row.identifier, rows: JSON.parse(row.snapshot), inferredComplete: Boolean(row.inferred_complete), lastSeenAt: row.last_seen_at }));
@@ -76,13 +79,13 @@ function createProjectsStore(db, getSource) {
   const create = db.transaction(input => {
     const fields = validateFields(input);
     const now = new Date().toISOString();
-    const result = db.prepare("INSERT INTO projects (name, customer, target_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(fields.name, fields.customer, fields.targetDate, now, now);
+    const result = db.prepare("INSERT INTO projects (name, customer, target_date, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(fields.name, fields.customer, fields.targetDate, fields.notes, now, now);
     return detail(Number(result.lastInsertRowid));
   });
   const update = db.transaction((id, input) => {
-    checkRevision(id, input.revision);
-    const fields = validateFields(input);
-    db.prepare("UPDATE projects SET name = ?, customer = ?, target_date = ? WHERE id = ?").run(fields.name, fields.customer, fields.targetDate, id);
+    const current = checkRevision(id, input.revision);
+    const fields = validateFields({ ...input, notes: input.notes === undefined ? current.notes : input.notes });
+    db.prepare("UPDATE projects SET name = ?, customer = ?, target_date = ?, notes = ? WHERE id = ?").run(fields.name, fields.customer, fields.targetDate, fields.notes, id);
     touch(id);
     return detail(id);
   });
@@ -134,6 +137,9 @@ function fail(status, message) {
 
 function validateFields(input) {
   const fields = {};
+  if (input.notes !== undefined && typeof input.notes !== "string") fail(400, "Invalid notes.");
+  fields.notes = input.notes ?? "";
+  if (fields.notes.length > 5000) fail(400, "Notes must be 5,000 characters or fewer.");
   for (const [key, limit] of [["name", 200], ["customer", 200], ["targetDate", 10]]) {
     if (input[key] !== undefined && typeof input[key] !== "string") fail(400, `Invalid ${key}.`);
     fields[key] = (input[key] || "").trim();

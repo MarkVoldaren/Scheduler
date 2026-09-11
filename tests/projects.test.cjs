@@ -13,6 +13,47 @@ const row = (wo, combo = "", overrides = {}) => ({ "Ship By": "9/25/2026", "WO #
 const csv = rows => [headers.join(","), ...rows.map(row => headers.map(header => `"${String(row[header] || "").replaceAll('"', '""')}"`).join(","))].join("\n");
 const member = (id, type, identifier, rows, inferredComplete = false) => ({ id, type, identifier, rows, inferredComplete, lastSeenAt: "2026-09-11T12:00:00Z" });
 
+test("notes migrate existing projects, validate input and preserve omitted values", () => {
+  const Database = require("better-sqlite3");
+  const { createProjectsStore } = require("../projects-store");
+  const db = new Database(":memory:");
+  try {
+    db.exec(`CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT, customer TEXT, target_date TEXT, archived INTEGER, revision INTEGER, created_at TEXT, updated_at TEXT);
+      INSERT INTO projects VALUES (1, 'Existing', '', '', 0, 1, '', '');`);
+    const source = () => ({ rows: [], metadata: null });
+    const store = createProjectsStore(db, source);
+    assert.equal(store.detail(1).project.notes, "");
+    const notes = '  Check <script> & "quotes"\nRésumé — ready 🚀\n';
+    let d = store.update(1, { name: "Existing", revision: 1, notes });
+    assert.equal(d.project.notes, notes);
+    d = store.update(1, { name: "Renamed", revision: d.project.revision });
+    assert.equal(d.project.notes, notes);
+    assert.throws(() => store.update(1, { name: "Stale", revision: 1, notes: "Lost" }), { status: 409 });
+    assert.equal(store.detail(1).project.notes, notes);
+    assert.throws(() => store.create({ name: "Bad", notes: 5 }), { status: 400 });
+    assert.throws(() => store.create({ name: "Too long", notes: "x".repeat(5001) }), { status: 400 });
+    assert.equal(store.create({ name: "Limit", notes: "x".repeat(5000) }).project.notes.length, 5000);
+    assert.equal(createProjectsStore(db, source).detail(1).project.notes, notes);
+    d = store.update(1, { name: "Renamed", revision: d.project.revision, notes: "" });
+    assert.equal(d.project.notes, "");
+  } finally { db.close(); }
+});
+
+test("printed notes preserve complete text, escape HTML and continue after scope", () => {
+  const print = require("../projects-print");
+  const detail = { project: { name: "Notes", notes: "" }, ...projectView([]) };
+  assert.doesNotMatch(print.buildHtml(detail), /<section class="page project-note-page">/);
+  for (const notes of ['Line one\n<unsafe> & "quoted" — 🚀', "x".repeat(5000), "\n".repeat(5000)]) {
+    detail.project.notes = notes;
+    const html = print.buildHtml(detail);
+    const chunks = [...html.matchAll(/<div class="project-note-body">([\s\S]*?)<\/div>/g)].map(match => match[1]);
+    const escaped = notes.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    assert.equal(chunks.join(""), escaped);
+    assert.ok(html.indexOf('class="page project-note-page"') > html.indexOf('class="page scope"'));
+    assert.ok(html.includes(`${chunks.length + 2} / ${chunks.length + 2}`));
+  }
+});
+
 test("supplied scheduler data retains its normalized job count and hours", () => {
   const rows = readWorkCenter(fs.readFileSync(path.join(__dirname, "../StPWorkCenterFullResults669.csv"), "utf8"));
   const jobs = core.buildJobs(rows);
@@ -133,7 +174,9 @@ test("authenticated project APIs persist across viewers, uploads and server rest
   }
   await api("/projects", "POST", { name: " " }, 400);
   await api("/projects", "POST", { name: "Bad date", targetDate: "2026-02-30" }, 400);
-  let d = await api("/projects", "POST", { name: "Fall launch", customer: "Bush Hog", targetDate: "2026-09-25" }, 201);
+  const projectNotes = "Keep packing labels together.\nConfirm résumé artwork — <sample>.";
+  let d = await api("/projects", "POST", { name: "Fall launch", customer: "Bush Hog", targetDate: "2026-09-25", notes: projectNotes }, 201);
+  assert.equal(d.project.notes, projectNotes);
   const id = d.project.id, url = `/projects/${id}`;
   const firstRows = [row("W1", "C1"), row("W2", "C1"), row("W3")];
   await upload(csv(firstRows));
@@ -145,6 +188,7 @@ test("authenticated project APIs persist across viewers, uploads and server rest
   const duplicate = await api(`${url}/members`, "POST", { revision: d.project.revision, members: [{ type: "wo", identifier: "W3" }] });
   assert.equal(duplicate.project.revision, d.project.revision);
   assert.deepEqual((await api(url, "GET", null, 200, secondCookie)).summary, d.summary);
+  assert.equal((await api(url, "GET", null, 200, secondCookie)).project.notes, projectNotes);
   await api(url, "PUT", { name: "Stale change", revision: 1 }, 409);
   d = await api(url, "PUT", { name: "Updated launch", customer: "Bush Hog", targetDate: "2026-09-30", revision: d.project.revision });
   let other = await api("/projects", "POST", { name: "Other project" }, 201);
@@ -166,6 +210,7 @@ test("authenticated project APIs persist across viewers, uploads and server rest
   assert.ok(d.members.every(member => member.inferredComplete));
   await stop(); await start(); cookie = await login();
   assert.deepEqual((await api(url)).summary, d.summary);
+  assert.equal((await api(url)).project.notes, projectNotes);
   await upload(csv([row("W1", "C1"), row("W4", "C1"), row("W3")]));
   d = await api(url); assert.equal(d.summary.remainingHours, 30); assert.ok(d.members.every(member => !member.inferredComplete));
   // Missing physical source is not a successful empty upload.
@@ -175,8 +220,12 @@ test("authenticated project APIs persist across viewers, uploads and server rest
   fs.writeFileSync(sourcePath, savedBytes);
   d = await api(`${url}/archive`, "PUT", { revision: d.project.revision, archived: true });
   assert.equal(d.project.archived, true);
+  assert.equal(d.project.notes, projectNotes);
+  d = await api(url, "PUT", { name: d.project.name, revision: d.project.revision, notes: "Archived note" });
+  assert.equal(d.project.notes, "Archived note");
   await api(`${url}/members/${d.members[0].id}`, "DELETE", { revision: d.project.revision }, 400);
   d = await api(`${url}/archive`, "PUT", { revision: d.project.revision, archived: false });
+  assert.equal(d.project.notes, "Archived note");
   d = await api(`${url}/members/${d.members[0].id}`, "DELETE", { revision: d.project.revision });
   assert.equal(d.members.length, 1);
   assert.equal(d.summary.workOrderCount, 1);

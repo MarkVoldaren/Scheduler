@@ -9,6 +9,18 @@
   const shorten = (text, limit) => { text = String(text || ""); return text.length > limit ? text.slice(0, limit - 3) + "..." : text; };
   const sum = values => values.reduce((total, value) => total + value, 0);
 
+  function notePages(text) {
+    const pages = [];
+    let chunk = "", lines = 0;
+    for (const character of String(text || "")) {
+      chunk += character;
+      if (character === "\n") lines += 1;
+      if (chunk.length >= 1000 || lines >= 24) { pages.push(chunk); chunk = ""; lines = 0; }
+    }
+    if (chunk) pages.push(chunk);
+    return pages;
+  }
+
   function scopeRow(member) {
     const counted = member.workOrders.filter(wo => wo.counted !== false);
     const departments = new Map();
@@ -27,7 +39,8 @@
     const pages = [];
     for (let i = 0; i < detail.members.length; i += 6) pages.push(detail.members.slice(i, i + 6));
     if (!pages.length) pages.push([]);
-    const totalPages = pages.length + 1;
+    const notes = notePages(p.notes);
+    const totalPages = pages.length + 1 + notes.length;
     const header = '<header><b>PRODUCTION SCHEDULER</b><span>PROJECT SUMMARY</span></header>';
     const footer = (page, label) => `<footer><span>${esc(shorten(p.name, 70))}</span><span>${label}</span><span>${page} / ${totalPages}</span></footer>`;
     const largest = [...detail.departments].sort((a, b) => b.hours - a.hours)[0];
@@ -35,7 +48,7 @@
     const inferred = detail.members.filter(m => m.inferredComplete).length;
     const target = p.targetDate ? new Date(`${p.targetDate}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not set";
     const metrics = [["HOURS REMAINING",num(s.remainingHours),"hours"],["WORK IN SCOPE",num(s.workOrderCount),"unique WOs"],["PRODUCTION QTY",num(s.quantity),"ordered units"],["PRODUCTION PROGRESS",`${num(s.progress)}%`,"operation quantities"]];
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(p.name)} - Project summary</title><style>
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(p.name)} - Project summary</title><style>
       @page { size: letter portrait; margin: .55in; }
       * { box-sizing: border-box; } body { margin: 0; color: #172940; font: 10pt Arial, sans-serif; background: white; }
       .page { min-height: 9.85in; display: flex; flex-direction: column; break-after: page; } .page:last-child { break-after: auto; }
@@ -48,6 +61,7 @@
       table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-top: 16pt; font-size: 9pt; } th { text-align: left; font-size: 7pt; padding: 10pt 6pt; color: white; background: #172940; } th:first-child { width: 53%; } th:nth-child(2) { width: 7%; } th:nth-child(3) { width: 14%; } th:nth-child(4) { width: 14%; } th:last-child { width: 12%; }
       td { vertical-align: top; padding: 14pt 6pt; border-bottom: .6pt solid #dce3ec; overflow-wrap: anywhere; } td:not(:first-child) { white-space: nowrap; } tbody tr:nth-child(odd) { background: #f3f6fa; } tr { break-inside: avoid; } thead { display: table-header-group; } .item { display: flex; gap: 10pt; align-items: baseline; } .tag { font-size: 7pt; color: #3267c8; } .description { font-size: 8.5pt; } .breakdown,.row-note { color: #607086; font-size: 7.5pt; line-height: 1.4; } .row-note { color: #805000; } .progress-value { color: #1c7b6b; font-weight: bold; } .total td { color: white; background: #172940; font-size: 8pt; font-weight: bold; padding: 10pt 6pt; } .notes { color: #607086; font-size: 8pt; margin-top: 14pt; }
       .scope:has(tbody:first-of-type > tr:nth-child(5)) td { padding: 6pt; }
+      .project-note-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: 10pt; }
       @media screen { body { background: #e8edf3; padding: 24px; } .page { width: 8.5in; min-height: 11in; margin: 0 auto 24px; padding: .55in; background: white; box-shadow: 0 2px 12px #0002; } }
       @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
     </style></head><body><section class="page overview">${header}<h1>${esc(p.name)}</h1><p class="meta">Customer: ${esc(p.customer || "Not specified")} | Target: ${esc(target)}${p.archived ? " | Archived" : ""}</p><p class="meta">Source: ${esc(detail.source?.originalName || "Unavailable")}<br>Updated ${esc(stamp(detail.source?.uploadedAt))} | Printed ${esc(stamp(new Date().toISOString()))}</p>
@@ -56,6 +70,7 @@
       <div class="glance"><h2><span class="section-number">02</span>Project at a glance</h2><p><b>${s.comboCount} ${s.comboCount === 1 ? "combo" : "combos"} + ${s.individualCount} standalone ${s.individualCount === 1 ? "work order" : "work orders"}</b></p>${largest?.hours > 0 ? `<p>${esc(largest.name)} holds the largest share of remaining work: ${num(largest.hours)} hours (${num(Math.round(largest.hours / s.remainingHours * 100))}%).</p>` : ""}<p>${detail.warning ? "Source data is unavailable; figures reflect last-known records." : inferred ? `${inferred} scope ${inferred === 1 ? "item is" : "items are"} marked inferred complete from absence in the latest upload.` : detail.members.length ? "All scope items have current source data." : "No work has been added to this project."}</p></div>
       <p class="method">Production progress reflects operation quantities, not hours completed. Project totals count each WO and included operation once.</p><div class="footer-space"></div>${footer(1,"PROJECT OVERVIEW")}</section>
       ${pages.map((members,i) => `<section class="page scope">${header}<h1>Project scope${i ? " (continued)" : ""}</h1><p class="meta">One summary row per combo or standalone work order.<br>Combo member WOs remain included in totals without individual listings.</p><table><thead><tr><th>SCOPE ITEM</th><th>WOs</th><th>QUANTITY</th><th>HOURS LEFT</th><th>PROGRESS</th></tr></thead><tbody>${members.map(scopeRow).join("") || '<tr><td colspan="5">No work added yet.</td></tr>'}</tbody>${i === pages.length-1 ? `<tbody class="total"><tr><td>PROJECT TOTAL</td><td>${s.workOrderCount}</td><td>${num(s.quantity)}</td><td>${num(s.remainingHours)} h</td><td>${num(s.progress)}%</td></tr></tbody>` : ""}</table>${i === pages.length-1 ? '<div class="notes"><p><b>Progress:</b> Project progress averages included operations; it is not a simple average of scope-row percentages.</p><p><b>Completion labels:</b> Inferred complete means absent from an accepted upload. Last-known quantities are retained; returning work resumes live values.</p><p>Descriptions are shortened for this summary. Department breakdowns show the three largest departments, with remaining hours grouped as other departments. Full details remain in the dashboard.</p></div>' : '<p class="notes">Scope continues on the next page. Project totals appear on the final page.</p>'}<div class="footer-space"></div>${footer(i+2,"SCOPE SUMMARY")}</section>`).join("")}</body></html>`;
+    return html.replace('</body></html>', notes.map((text, index) => `<section class="page project-note-page">${header}<h1>Project notes${index ? " (continued)" : ""}</h1><div class="project-note-body">${esc(text)}</div><div class="footer-space"></div>${footer(pages.length + 2 + index, "PROJECT NOTES")}</section>`).join("") + '</body></html>');
   }
   // Measure at the report's letter-paper screen width before opening print.
   // Move whole rows when long IDs, department names or completion notes need
@@ -69,7 +84,7 @@
       overview.querySelectorAll('.cards, .glance').forEach(el => { el.style.marginTop = '12pt'; el.style.marginBottom = '12pt'; });
     }
     let page = doc.querySelector('.scope');
-    while (page) {
+    while (page && page.classList.contains('scope')) {
       const rows = page.querySelector('tbody');
       while (page.getBoundingClientRect().height > pageLimit && rows.children.length > 1) {
         let next = page.nextElementSibling;
@@ -87,6 +102,21 @@
         next.querySelector('tbody').prepend(rows.lastElementChild);
       }
       page = page.nextElementSibling;
+    }
+    let notePage = doc.querySelector('.project-note-page');
+    while (notePage) {
+      const body = notePage.querySelector('.project-note-body');
+      if (notePage.getBoundingClientRect().height > pageLimit && body.textContent.length > 1) {
+        const characters = Array.from(body.textContent);
+        const split = Math.ceil(characters.length / 2);
+        const next = notePage.cloneNode(true);
+        body.textContent = characters.slice(0, split).join('');
+        next.querySelector('.project-note-body').textContent = characters.slice(split).join('');
+        next.querySelector('h1').textContent = 'Project notes (continued)';
+        notePage.after(next);
+        continue;
+      }
+      notePage = notePage.nextElementSibling;
     }
     const pages = [...doc.querySelectorAll('.page')];
     pages.forEach((el, index) => { el.querySelector('footer span:last-child').textContent = `${index + 1} / ${pages.length}`; });

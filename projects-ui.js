@@ -60,6 +60,7 @@
       }
       const project = detail.project;
       dashboard.innerHTML = `<div class="project-heading"><div><h2>${esc(project.name)}${project.archived ? ' <span class="project-tag">Archived</span>' : ""}</h2><p class="project-muted">${esc(project.customer || "No customer specified")} · Target ${esc(date(project.targetDate))}</p></div><div class="project-actions">${button("edit", "Edit details")}${button("archive", project.archived ? "Restore" : "Archive")}${button("print", "Print Project")}${button("download", "Download CSV")}</div></div>
+        ${project.notes ? `<section class="project-panel"><h3>Project notes</h3><div class="project-notes-text">${esc(project.notes)}</div></section>` : ""}
         <p class="project-source">${esc(detail.source?.originalName || "No work-center source")} · Uploaded ${esc(timestamp(detail.source?.uploadedAt))}</p>
         ${detail.warning ? `<p class="project-notice" role="status">${esc(detail.warning)}</p>` : ""}${cards(detail)}${departments(detail)}
         <section class="project-panel"><div class="project-heading"><h3>Project scope</h3>${!project.archived ? button("add", "+ Add WOs &amp; Combos") : ""}</div>
@@ -71,6 +72,10 @@
       if (mode === "create" || mode === "edit") {
         const project = mode === "edit" ? detail.project : {};
         editor.innerHTML = `<form class="project-panel project-form" data-project-form><h3>${mode === "create" ? "Create project" : "Edit project"}</h3><div class="project-fields"><label>Project name<input name="name" required maxlength="200" value="${esc(project.name || "")}" placeholder="e.g. Bush Hog — Fall launch"></label><label>Customer<input name="customer" maxlength="200" value="${esc(project.customer || "")}" placeholder="Customer name"></label><label>Target date<input type="date" name="targetDate" value="${esc(project.targetDate || "")}"></label></div><div class="project-heading"><span class="project-muted">${mode === "create" ? "Add combos and individual WOs after creating." : "Changes are shared with all viewers."}</span><div class="project-actions">${button("cancel", "Cancel")}<button type="submit" class="button button-primary">${mode === "create" ? "Create project" : "Save changes"}</button></div></div></form>`;
+        const label = document.createElement("label");
+        label.className = "project-notes-editor";
+        label.innerHTML = `Project notes<textarea name="notes" maxlength="5000" rows="5" placeholder="Add project instructions, updates, or reminders…">${esc(project.notes || "")}</textarea><small class="project-muted">Optional · Up to 5,000 characters</small>`;
+        editor.querySelector(".project-fields").after(label);
       } else if (mode === "picker") {
         editor.innerHTML = `<section class="project-panel"><h3>Add WOs &amp; Combos</h3><label>Search production work<input type="search" data-project-search placeholder="WO, combo, customer, part, description…" value="${esc(search)}"></label><p class="project-muted">Select whole combos or standalone WOs. Combo membership follows the latest upload.</p><div class="project-candidates"></div><div class="project-heading"><span data-project-selection-count></span><div class="project-actions">${button("cancel", "Cancel")}${button("save-members", "Add selected work", true)}</div></div></section>`;
         renderCandidates();
@@ -104,7 +109,7 @@
     async function perform(action) {
       if (busy) return;
       busy = true; ++generation; error = ""; notice = "Saving…"; status();
-      const controls = [...root.querySelectorAll("button, select, input")].filter(node => !node.disabled);
+      const controls = [...root.querySelectorAll("button, select, input, textarea")].filter(node => !node.disabled);
       controls.forEach(node => { node.disabled = true; });
       try { await action(); }
       catch (err) { error = err.message; notice = ""; status(); }

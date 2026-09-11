@@ -30,6 +30,8 @@ New CSV uploads overwrite the active CSV file. The app does not retain upload hi
 
 ## Projects
 
+Add optional **Project notes** when creating a project or through **Edit details**. Notes are shared plain text, support multiple lines and up to 5,000 characters, and save with **Save changes**. They persist across uploads and restarts and remain editable on archived projects. Saved notes appear on the dashboard and after the printed scope summary, with continuation pages when needed. Unsaved edits remain in the form during downloads, refreshes, or failed saves. Notes are not included in the part-level CSV export.
+
 Open **Projects** in the sidebar to create a named group, optionally set its customer and target date, and add whole combos or standalone work orders. Projects are shared by all signed-in viewers. Project metadata, membership, and the last known work details are stored in the existing SQLite database; replacing either CSV does not remove them. Archive old projects and use **Archived projects** to find and restore them.
 
 Use **Download CSV** beside **Print Project** to export the selected project's saved scope. The export has one row per work-order and part, expands combos without repeating operation rows, includes retained inferred-complete work, and is independent of dashboard filters. It contains part, description, WO, Dynamic BOM, customer, quantity, ship-by date, remaining hours, production progress, and tracking status. Downloads use the project name and current date in the filename and remain available for archived projects.
