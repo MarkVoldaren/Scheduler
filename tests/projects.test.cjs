@@ -1,0 +1,164 @@
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const { spawn } = require("node:child_process");
+const { once } = require("node:events");
+const core = require("../scheduler-core");
+const { readWorkCenter, projectView } = require("../projects-domain");
+
+const headers = ["Ship By", "WO #", "Combo #", "Customer", "Part", "Description", "Operation Sequence", "Operation Name", "Manufacturing Work Center", "Hours Remaining", "WO Quantity", "Status", "Completed Quantity", "Remaining Quantity"];
+const row = (wo, combo = "", overrides = {}) => ({ "Ship By": "9/25/2026", "WO #": wo, "Combo #": combo, Customer: "Bush Hog", Part: "BH-1", Description: "Decal", "Operation Sequence": "1", "Operation Name": "Print", "Manufacturing Work Center": "Screen", "Hours Remaining": "10", "WO Quantity": "100", Status: "In Process", "Completed Quantity": "50", "Remaining Quantity": "50", ...overrides });
+const csv = rows => [headers.join(","), ...rows.map(row => headers.map(header => `"${String(row[header] || "").replaceAll('"', '""')}"`).join(","))].join("\n");
+const member = (id, type, identifier, rows, inferredComplete = false) => ({ id, type, identifier, rows, inferredComplete, lastSeenAt: "2026-09-11T12:00:00Z" });
+
+test("supplied scheduler data retains its normalized job count and hours", () => {
+  const rows = readWorkCenter(fs.readFileSync(path.join(__dirname, "../StPWorkCenterFullResults669.csv"), "utf8"));
+  const jobs = core.buildJobs(rows);
+  assert.equal(rows.length, 2506);
+  assert.equal(jobs.length, 465);
+  assert.ok(Math.abs(jobs.reduce((sum, job) => sum + job.totalHoursRemaining, 0) - 4055.9) < 0.00001);
+});
+
+test("quantity counts each WO once while progress averages normalized operations", () => {
+  const rows = [row("W1", "C1"), row("W2", "C1"), row("W1", "C1", { "Operation Sequence": "2", "Manufacturing Work Center": "Finish", "Hours Remaining": "5", "WO Quantity": "90", "Completed Quantity": "0", "Remaining Quantity": "90" })];
+  const result = projectView([member(1, "combo", "C1", rows)]);
+  assert.equal(result.summary.quantity, 200);
+  assert.equal(result.summary.workOrderCount, 2);
+  assert.equal(result.summary.remainingHours, 25);
+  assert.equal(result.summary.progress, 25);
+  assert.deepEqual(result.departments, [{ name: "Finish", hours: 5 }, { name: "Screen", hours: 20 }]);
+});
+
+test("overlapping saved WO and combo count operations once, live data wins over snapshots", () => {
+  const rows = [row("W1", "C1"), row("W2", "C1")];
+  let result = projectView([member(1, "wo", "W1", rows.slice(0, 1)), member(2, "combo", "C1", rows)]);
+  assert.equal(result.summary.remainingHours, 20);
+  assert.equal(result.summary.quantity, 200);
+  assert.equal(result.members[0].remainingHours, 0);
+  assert.equal(result.members[0].workOrders[0].counted, false);
+  result = projectView([member(1, "combo", "OLD", rows, true), member(2, "wo", "W1", [row("W1")])]);
+  assert.equal(result.summary.remainingHours, 10);
+  assert.equal(result.summary.quantity, 200);
+  assert.equal(result.summary.progress, 75);
+});
+
+test("completed and empty project metrics and strict upload validation", () => {
+  const result = projectView([member(1, "wo", "W1", [row("W1")], true)]);
+  assert.equal(result.summary.progress, 100);
+  assert.equal(result.summary.remainingHours, 0);
+  assert.equal(result.summary.quantity, 100);
+  assert.equal(projectView([]).summary.progress, 0);
+  assert.deepEqual(readWorkCenter(csv([])), []);
+  assert.equal(readWorkCenter(`\uFEFF${csv([row("W1")])}`).length, 1);
+  assert.throws(() => readWorkCenter("wrong,columns\n1,2"), /missing columns/);
+  assert.throws(() => readWorkCenter(`${csv([])}\n"unterminated`), /unclosed/);
+  assert.throws(() => readWorkCenter(`${csv([])}\n1,2`), /wrong number/);
+  assert.throws(() => readWorkCenter(`\n${csv([]).replace("WO #", " WO # ")}`), /column names/);
+});
+
+test("project print contains all WO and operation detail and escapes project content", () => {
+  const context = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../projects-ui.js"), "utf8"), context);
+  const detail = { project: { name: '<script>alert("x")</script>', customer: "Bush Hog", targetDate: "2026-09-25" }, ...projectView([member(1, "combo", "C1", [row("W1", "C1"), row("W2", "C1")], true)]), source: { originalName: "work.csv", uploadedAt: "2026-09-11T12:00:00Z" } };
+  const html = context.ProjectPrint.buildHtml(detail);
+  assert.match(html, /W1/); assert.match(html, /W2/); assert.match(html, /Screen/);
+  assert.match(html, /Completed — absent/); assert.match(html, /table-header-group/);
+  assert.match(html, /&lt;script&gt;/); assert.doesNotMatch(html, /<script>|<details/);
+});
+
+test("authenticated project APIs persist across viewers, uploads and server restarts", { timeout: 30000 }, async t => {
+  const cacheRoot = path.resolve(__dirname, "../.cache");
+  fs.mkdirSync(cacheRoot, { recursive: true });
+  const dataDir = fs.mkdtempSync(path.join(cacheRoot, "projects-test-"));
+  let child, base;
+  async function start() {
+    child = spawn(process.execPath, [path.join(__dirname, "../server.js")], { env: { ...process.env, HOST: "127.0.0.1", PORT: "0", DATA_DIR: dataDir, SQLITE_PATH: path.join(dataDir, "app.sqlite"), APP_PASSWORD: "project-test", SESSION_SECRET: "project-test-secret", NODE_ENV: "test" }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    base = await new Promise((resolve, reject) => {
+      let log = "";
+      const timeout = setTimeout(() => reject(new Error(`Server start timed out: ${log}`)), 8000);
+      child.stdout.on("data", data => { log += data; const match = log.match(/http:\/\/127\.0\.0\.1:\d+/); if (match) { clearTimeout(timeout); resolve(match[0]); } });
+      child.stderr.on("data", data => { log += data; });
+      child.on("exit", code => { clearTimeout(timeout); reject(new Error(`Server exited ${code}: ${log}`)); });
+    });
+  }
+  async function stop() { if (child && child.exitCode === null) { const exited = once(child, "exit"); child.kill(); await exited; } }
+  t.after(async () => {
+    await stop();
+    assert.ok(path.resolve(dataDir).startsWith(cacheRoot + path.sep));
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+  await start();
+  async function login() {
+    const response = await fetch(`${base}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "project-test" }) });
+    assert.equal(response.status, 200);
+    return response.headers.getSetCookie().map(value => value.split(";")[0]).join("; ");
+  }
+  let cookie = await login();
+  const secondCookie = await login();
+  async function api(url, method = "GET", body, expected = 200, auth = cookie) {
+    const response = await fetch(`${base}/api${url}`, { method, headers: { Cookie: auth, "Content-Type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const result = await response.json();
+    assert.equal(response.status, expected, JSON.stringify(result));
+    return result;
+  }
+  async function upload(text, expected = 200) {
+    const form = new FormData(); form.append("csv", new Blob([text], { type: "text/csv" }), "work.csv");
+    const response = await fetch(`${base}/api/csv/work-center`, { method: "POST", headers: { Cookie: cookie }, body: form });
+    const result = await response.json(); assert.equal(response.status, expected, JSON.stringify(result)); return result;
+  }
+  await api("/projects", "GET", null, 401, "");
+  for (const asset of ["/server.js", "/projects-store.js", "/data/app.sqlite"]) {
+    assert.equal((await fetch(base + asset)).status, 404);
+  }
+  await api("/projects", "POST", { name: " " }, 400);
+  await api("/projects", "POST", { name: "Bad date", targetDate: "2026-02-30" }, 400);
+  let d = await api("/projects", "POST", { name: "Fall launch", customer: "Bush Hog", targetDate: "2026-09-25" }, 201);
+  const id = d.project.id, url = `/projects/${id}`;
+  const firstRows = [row("W1", "C1"), row("W2", "C1"), row("W3")];
+  await upload(csv(firstRows));
+  const candidates = await api("/projects/candidates");
+  assert.deepEqual(candidates.candidates.map(item => item.identifier), ["C1", "W3"]);
+  await api(`${url}/members`, "POST", { revision: d.project.revision, members: [{ type: "wo", identifier: "W1" }] }, 400);
+  d = await api(`${url}/members`, "POST", { revision: d.project.revision, members: [{ type: "combo", identifier: "C1" }, { type: "wo", identifier: "W3" }, { type: "wo", identifier: "W3" }] });
+  assert.equal(d.members.length, 2); assert.equal(d.summary.remainingHours, 30);
+  const duplicate = await api(`${url}/members`, "POST", { revision: d.project.revision, members: [{ type: "wo", identifier: "W3" }] });
+  assert.equal(duplicate.project.revision, d.project.revision);
+  assert.deepEqual((await api(url, "GET", null, 200, secondCookie)).summary, d.summary);
+  await api(url, "PUT", { name: "Stale change", revision: 1 }, 409);
+  d = await api(url, "PUT", { name: "Updated launch", customer: "Bush Hog", targetDate: "2026-09-30", revision: d.project.revision });
+  let other = await api("/projects", "POST", { name: "Other project" }, 201);
+  other = await api(`/projects/${other.project.id}/members`, "POST", { revision: other.project.revision, members: [{ type: "combo", identifier: "C1" }] });
+  assert.equal(other.summary.workOrderCount, 2);
+  const before = await api(url);
+  await upload("wrong,columns\n1,2", 400);
+  assert.deepEqual(await api(url), before);
+  // Saved standalone WO now belongs to the selected combo: only three WOs count.
+  await upload(csv([row("W1", "C1"), row("W2", "C1"), row("W3", "C1")]));
+  d = await api(url); assert.equal(d.summary.workOrderCount, 3); assert.equal(d.summary.remainingHours, 30); assert.equal(d.members[1].overlapping, true);
+  // A present combo follows changed membership; the independently saved W3 follows itself.
+  await upload(csv([row("W1", "C1"), row("W4", "C1"), row("W3", "C2"), row("W5", "C2")]));
+  d = await api(url); assert.equal(d.summary.workOrderCount, 3); assert.equal(d.summary.remainingHours, 30);
+  assert.deepEqual(d.members[0].workOrders.map(wo => wo.identifier), ["W1", "W4"]);
+  // Header-only CSV is valid: infer completion while retaining quantities.
+  await upload(csv([]));
+  d = await api(url); assert.equal(d.summary.remainingHours, 0); assert.equal(d.summary.progress, 100); assert.equal(d.summary.quantity, 300);
+  assert.ok(d.members.every(member => member.inferredComplete));
+  await stop(); await start(); cookie = await login();
+  assert.deepEqual((await api(url)).summary, d.summary);
+  await upload(csv([row("W1", "C1"), row("W4", "C1"), row("W3")]));
+  d = await api(url); assert.equal(d.summary.remainingHours, 30); assert.ok(d.members.every(member => !member.inferredComplete));
+  // Missing physical source is not a successful empty upload.
+  const sourcePath = path.join(dataDir, "uploads/work-center.csv"), savedBytes = fs.readFileSync(sourcePath);
+  fs.unlinkSync(sourcePath);
+  const unavailable = await api(url); assert.match(unavailable.warning, /unavailable/); assert.equal(unavailable.summary.remainingHours, 30);
+  fs.writeFileSync(sourcePath, savedBytes);
+  d = await api(`${url}/archive`, "PUT", { revision: d.project.revision, archived: true });
+  assert.equal(d.project.archived, true);
+  await api(`${url}/members/${d.members[0].id}`, "DELETE", { revision: d.project.revision }, 400);
+  d = await api(`${url}/archive`, "PUT", { revision: d.project.revision, archived: false });
+  d = await api(`${url}/members/${d.members[0].id}`, "DELETE", { revision: d.project.revision });
+  assert.equal(d.members.length, 1);
+  assert.equal(d.summary.workOrderCount, 1);
+});

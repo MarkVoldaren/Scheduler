@@ -6,6 +6,8 @@ const Database = require("better-sqlite3");
 const cookieSession = require("cookie-session");
 const express = require("express");
 const multer = require("multer");
+const { readWorkCenter } = require("./projects-domain");
+const { createProjectsStore } = require("./projects-store");
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -68,6 +70,18 @@ db.exec(`
 `);
 
 const app = express();
+function projectSource() {
+  const metadata = getCsvMetadata("work-center");
+  try {
+    if (!metadata) return { rows: null, metadata: null, warning: "Upload a work-center CSV to add work. Saved project details remain available." };
+    return { rows: readWorkCenter(fs.readFileSync(getActiveCsvPath("work-center"), "utf8")), metadata };
+  } catch (error) {
+    return { rows: null, metadata, warning: `Work-center data is unavailable. Showing last-known project data; no new completion is inferred. ${error.message}` };
+  }
+}
+const projects = createProjectsStore(db, projectSource);
+const initialProjectSource = projectSource();
+if (initialProjectSource.rows) projects.reconcile(initialProjectSource.rows, initialProjectSource.metadata.uploadedAt);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
@@ -106,6 +120,15 @@ app.post("/api/logout", (req, res) => {
 
 app.use("/api", requireAuth);
 
+app.get("/api/projects", (req, res) => res.json(projects.list()));
+app.get("/api/projects/candidates", (req, res) => res.json(projects.candidates()));
+app.get("/api/projects/:id", (req, res) => res.json(projects.detail(projectId(req.params.id))));
+app.post("/api/projects", (req, res) => res.status(201).json(projects.create(req.body || {})));
+app.put("/api/projects/:id", (req, res) => res.json(projects.update(projectId(req.params.id), req.body || {})));
+app.put("/api/projects/:id/archive", (req, res) => res.json(projects.archive(projectId(req.params.id), req.body || {})));
+app.post("/api/projects/:id/members", (req, res) => res.json(projects.add(projectId(req.params.id), req.body || {})));
+app.delete("/api/projects/:id/members/:memberId", (req, res) => res.json(projects.remove(projectId(req.params.id), projectId(req.params.memberId), req.body || {})));
+
 app.get("/api/app-state", (req, res) => {
   res.json({
     settings: getOperationalSettings(),
@@ -129,7 +152,7 @@ app.get("/api/csv/:kind", (req, res) => {
   res.type("text/csv").sendFile(activePath);
 });
 
-app.post("/api/csv/:kind", upload.single("csv"), async (req, res, next) => {
+app.post("/api/csv/:kind", upload.single("csv"), (req, res, next) => {
   try {
     const kind = normalizeCsvKind(req.params.kind);
     if (!kind) {
@@ -142,12 +165,18 @@ app.post("/api/csv/:kind", upload.single("csv"), async (req, res, next) => {
       return res.status(400).json({ error: "Only .csv uploads are supported" });
     }
 
+    let workCenterRows;
+    if (kind === "work-center") {
+      try {
+        workCenterRows = readWorkCenter(req.file.buffer.toString("utf8"));
+      } catch (error) {
+        return res.status(400).json({ error: error.message });
+      }
+    }
     const activePath = getActiveCsvPath(kind);
     const tempPath = `${activePath}.${process.pid}.${Date.now()}.tmp`;
-    await fs.promises.mkdir(UPLOAD_DIR, { recursive: true });
-    await fs.promises.writeFile(tempPath, req.file.buffer);
-    await fs.promises.rm(activePath, { force: true });
-    await fs.promises.rename(tempPath, activePath);
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    fs.writeFileSync(tempPath, req.file.buffer);
 
     const metadata = {
       kind,
@@ -156,7 +185,26 @@ app.post("/api/csv/:kind", upload.single("csv"), async (req, res, next) => {
       uploadedAt: new Date().toISOString(),
       size: req.file.size,
     };
-    saveCsvMetadata(metadata);
+    // Serialize replacement and snapshot updates with other requests. Keep the
+    // previous bytes if a database or filesystem write fails.
+    const previous = fs.existsSync(activePath) ? fs.readFileSync(activePath) : null;
+    let replaced = false;
+    try {
+      db.transaction(() => {
+        fs.renameSync(tempPath, activePath);
+        replaced = true;
+        saveCsvMetadata(metadata);
+        if (workCenterRows) projects.reconcile(workCenterRows, metadata.uploadedAt);
+      })();
+    } catch (error) {
+      if (replaced) {
+        if (previous) fs.writeFileSync(activePath, previous);
+        else fs.rmSync(activePath, { force: true });
+      }
+      throw error;
+    } finally {
+      fs.rmSync(tempPath, { force: true });
+    }
     res.json({ metadata });
   } catch (error) {
     next(error);
@@ -169,15 +217,18 @@ app.put("/api/settings", (req, res) => {
   res.json({ settings });
 });
 
-app.use(
-  express.static(__dirname, {
-    extensions: ["html"],
-    etag: false,
-    lastModified: false,
-    setHeaders: setNoCacheHeaders,
-  }),
-);
+// Serve browser assets only. In particular, the shared project database and
+// server-side modules must never be downloadable through the static root.
+const publicFiles = new Set(["/", "/index.html", "/app.js", "/styles.css", "/scheduler-core.js", "/projects-ui.js", "/main.js", "/csv.js", "/domain.js", "/render.js", "/selectors.js", "/state.js"]);
+const publicAssets = express.static(__dirname, {
+  extensions: ["html"],
+  etag: false,
+  lastModified: false,
+  setHeaders: setNoCacheHeaders,
+});
+app.use((req, res, next) => publicFiles.has(req.path) ? publicAssets(req, res, next) : next());
 app.get("*", (req, res) => {
+  if (req.path.startsWith("/api/") || path.extname(req.path)) return res.status(404).json({ error: "Not found" });
   setNoCacheHeaders(res);
   res.sendFile(path.join(__dirname, "index.html"));
 });
@@ -186,12 +237,15 @@ app.use((error, req, res, next) => {
   if (error && error.code === "LIMIT_FILE_SIZE") {
     return res.status(413).json({ error: "CSV upload is too large" });
   }
+  if ((error.status >= 400 && error.status < 500) || error.status === 503) {
+    return res.status(error.status).json({ error: error.message });
+  }
   console.error(error);
   res.status(500).json({ error: "Unexpected server error" });
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`Scheduler Operations listening on http://${HOST}:${PORT}`);
+const listener = app.listen(PORT, HOST, () => {
+  console.log(`Scheduler Operations listening on http://${HOST}:${listener.address().port}`);
 });
 
 function requireAuth(req, res, next) {
@@ -199,6 +253,16 @@ function requireAuth(req, res, next) {
     return next();
   }
   return res.status(401).json({ error: "Session required" });
+}
+
+function projectId(value) {
+  const id = Number(value);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    const error = new Error("Invalid project or member ID.");
+    error.status = 400;
+    throw error;
+  }
+  return id;
 }
 
 function setNoCacheHeaders(res) {

@@ -37,6 +37,10 @@
         </div>
 
         <nav class="sidebar-nav" aria-label="Scheduler navigation">
+          <button id="view-projects" class="sidebar-link" type="button" data-view="projects" aria-pressed="false">
+            <span class="sidebar-link-icon">Pr</span>
+            <span class="sidebar-link-label">Projects</span>
+          </button>
           <button id="view-sequencers" class="sidebar-link is-active" type="button" data-view="sequencers" aria-pressed="true">
             <span class="sidebar-link-icon">S</span>
             <span class="sidebar-link-label">Scheduler</span>
@@ -97,6 +101,9 @@
 
         <div class="workspace-grid">
           <main class="workspace-main">
+            <section class="page-view" id="page-projects" data-page="projects">
+              <div id="projects-root" class="projects-root"></div>
+            </section>
             <section class="page-view" id="page-capacity" data-page="capacity">
               <main class="panel panel-primary panel-wide">
                 <div class="panel-head">
@@ -301,6 +308,8 @@
       </section>
     </div>
 
+    <script src="scheduler-core.js"></script>
+    <script src="projects-ui.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
