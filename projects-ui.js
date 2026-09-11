@@ -33,22 +33,7 @@
     return `<section class="project-panel"><div class="project-heading"><h3>Hours remaining by department</h3><span>${number(detail.summary.remainingHours)} hrs total</span></div><div class="project-departments">${detail.departments.map(department => `<div><div class="project-heading"><span>${esc(department.name)}</span><strong>${number(department.hours)} h</strong></div><progress max="${max}" value="${Math.max(0, department.hours)}" aria-label="${esc(department.name)} remaining hours"></progress></div>`).join("") || '<p class="project-muted">Add work to see department hours.</p>'}</div></section>`;
   }
 
-  function printHtml(detail) {
-    const project = detail.project;
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(project.name)} — Project</title><style>
-      @page { size: auto; margin: 12mm; } * { box-sizing: border-box; } body { color: #172033; background: white; font: 10pt Arial,sans-serif; margin: 0; }
-      h1 { font-size: 20pt; margin: 0 0 8px; } h2 { font-size: 14pt; } h3,h4 { break-after: avoid; margin: 12px 0 8px; } p { margin: 7px 0; }
-      .project-cards { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin: 16px 0; } .project-card { border: 1px solid #aab4c2; padding: 10px; break-inside: avoid; }
-      .project-card span,.project-card small { display: block; font-size: 9pt; } .project-card strong { display: block; font-size: 18pt; margin: 8px 0; } .project-card strong small { display: inline; }
-      .project-heading { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; } .project-departments { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; } progress { width: 100%; height: 7px; }
-      .project-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8pt; margin: 8px 0 16px; } th,td { text-align: left; padding: 5px; border-bottom: 1px solid #ccd2db; overflow-wrap: anywhere; vertical-align: top; }
-      th { background: #eef1f5; } thead { display: table-header-group; } tr { break-inside: avoid; } .project-member { margin-top: 20px; border-top: 2px solid #53657c; } .project-notice { font-size: 9pt; } .project-tag { font-size: 8pt; } .project-panel { margin: 18px 0; }
-    </style></head><body><h1>${esc(project.name)}</h1><p>${esc(project.customer || "No customer specified")} · Target: ${esc(date(project.targetDate))}${project.archived ? " · Archived" : ""}</p>
-      <p>Source: ${esc(detail.source?.originalName || "Unavailable")} · Uploaded ${esc(timestamp(detail.source?.uploadedAt))}</p><p>Printed ${esc(timestamp(new Date().toISOString()))}</p>
-      ${detail.warning ? `<p>${esc(detail.warning)}</p>` : ""}${cards(detail)}${departments(detail)}<h2>Project scope</h2>
-      ${detail.members.map(member => `<section class="project-member"><h3>${member.type === "combo" ? "Combo" : "WO"} ${esc(member.identifier)} · ${number(member.remainingHours)} hrs remaining</h3><p>${esc(member.description)}</p>${memberContent(member, true)}</section>`).join("") || "<p>No work added yet.</p>"}
-      <p>Project hours count each included operation once. Production progress uses operation quantities, not elapsed hours.</p></body></html>`;
-  }
+  const printHtml = detail => globalThis.ProjectPrint.buildHtml(detail);
 
   globalThis.createProjectsUI = function ({ root, request, isActive }) {
     let projects = [], selectedId = null, detail = null, archived = false;
@@ -170,7 +155,7 @@
         const popup = window.open("", "_blank");
         if (!popup) { error = "Allow popups to print this project."; status(); return; }
         popup.document.write(printHtml(detail)); popup.document.close(); popup.focus();
-        popup.setTimeout(() => popup.print(), 250); return;
+        popup.setTimeout(() => { globalThis.ProjectPrint.prepare(popup.document); popup.print(); }, 250); return;
       }
       if (action === "refresh") { if (leaveEditor()) refresh(); return; }
       if (action === "cancel") { mode = ""; selectedMembers.clear(); render(); refresh(); return; }
@@ -203,5 +188,4 @@
     render();
     return { refresh, clear() { ++generation; mode = ""; selectedId = null; detail = null; projects = []; selectedMembers.clear(); error = ""; notice = ""; render(); } };
   };
-  globalThis.ProjectPrint = { buildHtml: printHtml };
 })();

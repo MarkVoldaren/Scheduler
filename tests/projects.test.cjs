@@ -58,14 +58,33 @@ test("completed and empty project metrics and strict upload validation", () => {
   assert.throws(() => readWorkCenter(`\n${csv([]).replace("WO #", " WO # ")}`), /column names/);
 });
 
-test("project print contains all WO and operation detail and escapes project content", () => {
+test("project summary print omits internal WOs, retains completion labels and escapes content", () => {
   const context = vm.createContext({});
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "../projects-ui.js"), "utf8"), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../projects-print.js"), "utf8"), context);
   const detail = { project: { name: '<script>alert("x")</script>', customer: "Bush Hog", targetDate: "2026-09-25" }, ...projectView([member(1, "combo", "C1", [row("W1", "C1"), row("W2", "C1")], true)]), source: { originalName: "work.csv", uploadedAt: "2026-09-11T12:00:00Z" } };
   const html = context.ProjectPrint.buildHtml(detail);
-  assert.match(html, /W1/); assert.match(html, /W2/); assert.match(html, /Screen/);
-  assert.match(html, /Completed — absent/); assert.match(html, /table-header-group/);
+  assert.doesNotMatch(html, /W1|W2|Quantity complete|Op 1/); assert.match(html, /C1/);
+  assert.match(html, /Inferred complete/); assert.match(html, /table-header-group/);
+  assert.equal((html.match(/class="page /g) || []).length, 2);
   assert.match(html, /&lt;script&gt;/); assert.doesNotMatch(html, /<script>|<details/);
+});
+
+test("summary print paginates every scope item and preserves deduplicated contributions", () => {
+  const print = require('../projects-print');
+  const makeDetail = members => ({ project: { name: 'Launch' }, ...projectView(members) });
+  for (const [count, pages] of [[0,2],[4,2],[7,3],[12,3],[13,4]]) {
+    const members = Array.from({length:count}, (_,i) => member(i+1,'wo',`SOLO-${i+1}`,[row(`SOLO-${i+1}`)]));
+    const html = print.buildHtml(makeDetail(members));
+    assert.equal((html.match(/class="page /g)||[]).length,pages);
+    assert.equal((html.match(/class="item"/g)||[]).length,count);
+    members.forEach(m => assert.equal(html.split(`<strong>${m.identifier}</strong>`).length-1,1));
+    assert.equal((html.match(/PROJECT TOTAL/g)||[]).length,1);
+  }
+  const rows = [row('INTERNAL-A','C1'),row('INTERNAL-B','C1')];
+  const html = print.buildHtml(makeDetail([member(1,'combo','C1',rows),member(2,'wo','INTERNAL-A',rows.slice(0,1))]));
+  assert.match(html, /Overlapping work counted elsewhere/);
+  assert.match(html, /<td>0<\/td><td>0<\/td><td><strong>0 h<\/strong>/);
+  assert.doesNotMatch(html, /INTERNAL-B/);
 });
 
 test("authenticated project APIs persist across viewers, uploads and server restarts", { timeout: 30000 }, async t => {

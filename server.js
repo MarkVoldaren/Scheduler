@@ -219,7 +219,7 @@ app.put("/api/settings", (req, res) => {
 
 // Serve browser assets only. In particular, the shared project database and
 // server-side modules must never be downloadable through the static root.
-const publicFiles = new Set(["/", "/index.html", "/app.js", "/styles.css", "/scheduler-core.js", "/projects-ui.js", "/main.js", "/csv.js", "/domain.js", "/render.js", "/selectors.js", "/state.js"]);
+const publicFiles = new Set(["/", "/index.html", "/app.js", "/styles.css", "/scheduler-core.js", "/projects-ui.js", "/projects-print.js", "/main.js", "/csv.js", "/domain.js", "/render.js", "/selectors.js", "/state.js"]);
 const publicAssets = express.static(__dirname, {
   extensions: ["html"],
   etag: false,

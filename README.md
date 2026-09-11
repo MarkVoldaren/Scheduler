@@ -38,7 +38,7 @@ When a saved combo or WO disappears from an accepted work-center upload, Project
 
 Project data refreshes when entering the module, returning to the browser, clicking Refresh, or saving changes. Open edit forms and selections are preserved. If another viewer or upload changes the project, a stale save is rejected; cancel or refresh the form to load the current version before editing again.
 
-**Print Project** includes the summary, department hours, all scoped WOs and their operations, and source timestamp, including collapsed rows. Use the browser's Save as PDF destination for a PDF copy.
+**Print Project** uses a compact summary report: a project overview with totals and department hours, then one row per combo or standalone WO. Internal combo WOs and operation tables are omitted. Scope pages contain up to six rows, with repeated headers and page numbers (normally two or three pages; larger projects continue without dropping scope). Descriptions are shortened and each row shows its three largest departments plus grouped remaining hours. Overlapping rows show only their contribution to totals. Use the browser's Save as PDF destination for a PDF copy.
 
 The additive migration creates `projects` and `project_members` on startup. Include `app.sqlite` in existing backups. No additional service or configuration is required.
 
