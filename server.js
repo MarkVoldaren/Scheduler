@@ -123,6 +123,11 @@ app.use("/api", requireAuth);
 app.get("/api/projects", (req, res) => res.json(projects.list()));
 app.get("/api/projects/candidates", (req, res) => res.json(projects.candidates()));
 app.get("/api/projects/:id", (req, res) => res.json(projects.detail(projectId(req.params.id))));
+app.get("/api/projects/:id/export.csv", (req, res) => {
+  const result = projects.exportCsv(projectId(req.params.id));
+  setNoCacheHeaders(res);
+  res.attachment(result.filename).type("text/csv; charset=utf-8").send(result.csv);
+});
 app.post("/api/projects", (req, res) => res.status(201).json(projects.create(req.body || {})));
 app.put("/api/projects/:id", (req, res) => res.json(projects.update(projectId(req.params.id), req.body || {})));
 app.put("/api/projects/:id/archive", (req, res) => res.json(projects.archive(projectId(req.params.id), req.body || {})));

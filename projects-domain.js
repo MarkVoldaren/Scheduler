@@ -58,30 +58,34 @@ function quantityByWo(rows) {
   return quantities;
 }
 
-function projectView(members) {
+function selectOwnedRows(members) {
   // Live work owns overlapping WOs before retained completion records; combos
   // own overlapping standalone selections. No operation is added twice.
   const ordered = [...members].sort((a, b) => Number(a.inferredComplete) - Number(b.inferredComplete) || Number(b.type === "combo") - Number(a.type === "combo") || a.id - b.id);
   const owners = new Map();
+  return ordered.map(member => {
+    const rows = member.rows.filter(row => !owners.has(String(row["WO #"] || "").trim()));
+    const counted = new Set(rows.map(row => String(row["WO #"] || "").trim()));
+    counted.forEach(wo => { if (wo) owners.set(wo, member.id); });
+    return { member, rows, counted };
+  });
+}
+
+function projectView(members) {
   const departments = new Map();
   const quantities = new Map();
   const allOperations = [];
   const views = new Map();
-  ordered.forEach(member => {
-    const rows = member.rows.filter(row => {
-      const wo = String(row["WO #"] || "").trim();
-      return !wo || !owners.has(wo);
-    });
+  selectOwnedRows(members).forEach(({ member, rows, counted }) => {
     const job = normalizeMember(member, rows);
     const fullJob = normalizeMember(member);
     const woQuantities = quantityByWo(member.rows);
     const workOrders = [...woQuantities].map(([identifier, quantity]) => {
       const woRows = memberRows(member.rows, "wo", identifier);
       const woJob = normalizeMember({ ...member, type: "wo", identifier }, woRows);
-      return { identifier, quantity, part: core.unique(woRows.map(row => row.Part)).join(" / "), description: core.unique(woRows.map(row => row.Description)).join(" / "), counted: !owners.has(identifier), operations: woJob.operations };
+      return { identifier, quantity, part: core.unique(woRows.map(row => row.Part)).join(" / "), description: core.unique(woRows.map(row => row.Description)).join(" / "), counted: counted.has(identifier), operations: woJob.operations };
     });
     quantityByWo(rows).forEach((quantity, wo) => {
-      owners.set(wo, member.id);
       quantities.set(wo, quantity);
     });
     if (job) {
@@ -114,4 +118,4 @@ function projectView(members) {
   };
 }
 
-module.exports = { readWorkCenter, memberRows, projectView };
+module.exports = { readWorkCenter, memberRows, projectView, selectOwnedRows, normalizeMember };

@@ -112,8 +112,23 @@ const state = createInitialState();
 const projectsUI = globalThis.createProjectsUI({
   root: document.querySelector("#projects-root"),
   request: fetchJson,
+  download: downloadProjectCsv,
   isActive: () => state.currentView === "projects" && document.body.dataset.auth === "unlocked",
 });
+
+async function downloadProjectCsv(url) {
+  const response = await fetch(resolveApiUrl(url), { credentials: "same-origin", cache: "no-store" });
+  if (response.status === 401) { setAuthenticated(false, "Your session expired. Sign in again."); throw new Error("Session expired."); }
+  if (!response.ok) throw new Error(`Download failed with status ${response.status}`);
+  const blob = await response.blob();
+  const match = (response.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)"?/i);
+  downloadBlob(blob, match ? match[1] : "project.csv");
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob), link = document.createElement("a");
+  link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 init();
 

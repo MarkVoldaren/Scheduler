@@ -1,6 +1,7 @@
 "use strict";
 
 const { memberRows, projectView } = require("./projects-domain");
+const { projectCsv } = require("./projects-csv");
 
 function createProjectsStore(db, getSource) {
   db.pragma("foreign_keys = ON");
@@ -119,7 +120,10 @@ function createProjectsStore(db, getSource) {
     touch(id);
     return detail(id);
   });
-  return { list, detail, create, update, archive, add, remove, candidates, reconcile };
+  function exportCsv(id) {
+    return projectCsv(project(id), members(id), getSource().rows !== null);
+  }
+  return { list, detail, create, update, archive, add, remove, candidates, reconcile, exportCsv };
 }
 
 function fail(status, message) {

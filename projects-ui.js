@@ -35,7 +35,7 @@
 
   const printHtml = detail => globalThis.ProjectPrint.buildHtml(detail);
 
-  globalThis.createProjectsUI = function ({ root, request, isActive }) {
+  globalThis.createProjectsUI = function ({ root, request, download, isActive }) {
     let projects = [], selectedId = null, detail = null, archived = false;
     let mode = "", candidateList = [], selectedMembers = new Set(), search = "", error = "", notice = "";
     let busy = false, generation = 0;
@@ -59,7 +59,7 @@
         return;
       }
       const project = detail.project;
-      dashboard.innerHTML = `<div class="project-heading"><div><h2>${esc(project.name)}${project.archived ? ' <span class="project-tag">Archived</span>' : ""}</h2><p class="project-muted">${esc(project.customer || "No customer specified")} · Target ${esc(date(project.targetDate))}</p></div><div class="project-actions">${button("edit", "Edit details")}${button("archive", project.archived ? "Restore" : "Archive")}${button("print", "Print Project")}</div></div>
+      dashboard.innerHTML = `<div class="project-heading"><div><h2>${esc(project.name)}${project.archived ? ' <span class="project-tag">Archived</span>' : ""}</h2><p class="project-muted">${esc(project.customer || "No customer specified")} · Target ${esc(date(project.targetDate))}</p></div><div class="project-actions">${button("edit", "Edit details")}${button("archive", project.archived ? "Restore" : "Archive")}${button("print", "Print Project")}${button("download", "Download CSV")}</div></div>
         <p class="project-source">${esc(detail.source?.originalName || "No work-center source")} · Uploaded ${esc(timestamp(detail.source?.uploadedAt))}</p>
         ${detail.warning ? `<p class="project-notice" role="status">${esc(detail.warning)}</p>` : ""}${cards(detail)}${departments(detail)}
         <section class="project-panel"><div class="project-heading"><h3>Project scope</h3>${!project.archived ? button("add", "+ Add WOs &amp; Combos") : ""}</div>
@@ -151,6 +151,11 @@
       const target = event.target.closest("[data-project-action], [data-remove-member]");
       if (!target || busy) return;
       const action = target.dataset.projectAction;
+      if (action === "download" && detail) {
+        busy = true; error = ""; notice = "Preparing CSV…"; status();
+        download(`/api/projects/${selectedId}/export.csv`).then(() => { notice = "CSV downloaded."; status(); }).catch(err => { error = err.message; notice = ""; status(); }).finally(() => { busy = false; });
+        return;
+      }
       if (action === "print" && detail) {
         const popup = window.open("", "_blank");
         if (!popup) { error = "Allow popups to print this project."; status(); return; }
