@@ -42,7 +42,7 @@ function normalizeMember(member, rows = member.rows) {
     rows,
   });
   if (member.inferredComplete) {
-    job.operations = job.operations.map(op => ({ ...op, hoursRemaining: 0, progressRatio: 1, progressPercent: 100, status: "Complete", phase: "complete" }));
+    job.operations = job.operations.map(op => ({ ...op, hoursRemaining: 0, progressRatio: 1, progressPercent: 100, fillRatio: 1, status: "Complete", phase: "complete" }));
     job.totalHoursRemaining = 0;
     job.percentComplete = 100;
   }
@@ -101,6 +101,8 @@ function projectView(members) {
       remainingHours: job?.totalHoursRemaining || 0,
       progress: job?.percentComplete ?? fullJob?.percentComplete ?? 0,
       operations: job?.operations || [],
+      displayOperations: fullJob?.operations || [],
+      displayProgress: fullJob?.percentComplete || 0,
       overlapping: rows.length < member.rows.length,
     });
   });

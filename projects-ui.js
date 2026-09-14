@@ -58,12 +58,17 @@
       <details><summary>View trend history and scope changes</summary><div class="project-table-wrap"><table class="project-table"><thead><tr><th>Date</th><th>Operations remaining</th><th>Reading</th><th>Captured</th><th>Source upload</th></tr></thead><tbody>${readings.map(point => `<tr><td>${esc(point.date)}</td><td>${point.remainingOperations}</td><td>${point.type === "baseline" ? "Baseline" : "Daily upload"}</td><td>${esc(timestamp(point.capturedAt))}</td><td>${esc(timestamp(point.sourceUploadedAt))}</td></tr>`).join("")}</tbody></table></div><h4>Scope changes</h4>${events.map(event => `<p class="project-trend-event"><strong>${esc(timestamp(event.occurredAt))}</strong> · ${esc(event.description)}</p>`).join("") || '<p class="project-muted">No scope changes recorded.</p>'}</details></section>`;
   }
 
-  globalThis.createProjectsUI = function ({ root, request, download, isActive }) {
+  globalThis.createProjectsUI = function ({ root, request, download, renderSequenceTrack, isActive }) {
     let projects = [], selectedId = null, detail = null, archived = false;
     let mode = "", candidateList = [], selectedMembers = new Set(), search = "", error = "", notice = "";
     let busy = false, generation = 0;
     const json = (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const key = member => `${member.type}:${member.identifier}`;
+    function scopeSummary(member) {
+      const operations = member.displayOperations || member.operations;
+      const progress = Math.max(0, Math.min(100, member.displayProgress ?? member.progress ?? 0));
+      return `<summary class="project-scheduler-summary"><div class="sequencer-row-main"><div class="sequencer-row-title"><span class="project-tag">${member.type === "combo" ? "COMBO" : "WO"}</span><strong class="sequencer-row-id">${esc(member.identifier)}</strong></div><div class="sequencer-row-meta project-scheduler-description">${esc(member.description)}</div><div class="project-muted">${member.workOrders.length} WOs${member.inferredComplete ? " · Inferred complete" : ""}${member.overlapping ? " · Overlapping WOs counted once in project totals" : ""}</div></div><div class="project-scheduler-track">${renderSequenceTrack ? renderSequenceTrack(operations) : ""}<div class="project-scheduler-progress"><progress max="100" value="${progress}" aria-label="${esc(member.identifier)} production progress"></progress><span>${number(progress)}%</span></div></div><div class="sequencer-row-stats"><strong>${number(member.remainingHours)} h</strong><div class="project-muted">${member.overlapping ? "In project totals" : "Remaining"}</div></div></summary>`;
+    }
     function status() {
       const target = root.querySelector(".project-status");
       if (target) { target.textContent = error || notice; target.classList.toggle("is-error", Boolean(error)); }
@@ -88,7 +93,7 @@
         <p class="project-source">${esc(detail.source?.originalName || "No work-center source")} · Uploaded ${esc(timestamp(detail.source?.uploadedAt))}</p>
         ${detail.warning ? `<p class="project-notice" role="status">${esc(detail.warning)}</p>` : ""}${cards(detail)}${departments(detail)}
         <section class="project-panel"><div class="project-heading"><h3>Project scope</h3>${!project.archived ? button("add", "+ Add WOs &amp; Combos") : ""}</div>
-        ${detail.members.map(member => `<div class="project-scope-row"><details data-member-id="${member.id}"${expanded.has(String(member.id)) ? " open" : ""}><summary><span class="project-tag">${member.type === "combo" ? "COMBO" : "WO"}</span> <strong>${esc(member.identifier)}</strong><span class="project-description">${esc(member.description)}</span><span class="project-row-metric">${member.workOrders.length} WOs · <strong>${number(member.remainingHours)} h</strong>${member.inferredComplete ? ' <span class="project-tag">Inferred complete</span>' : ""}</span></summary>${memberContent(member)}</details>${!project.archived ? `<button class="project-remove" type="button" data-remove-member="${member.id}" aria-label="Remove ${esc(member.identifier)} from project">Remove</button>` : ""}</div>`).join("") || '<p class="project-empty">No work added yet. Add combos and standalone work orders to define this project.</p>'}
+        ${detail.members.map(member => `<div class="project-scope-row"><details data-member-id="${member.id}"${expanded.has(String(member.id)) ? " open" : ""}>${scopeSummary(member)}${memberContent(member)}</details>${!project.archived ? `<button class="project-remove" type="button" data-remove-member="${member.id}" aria-label="Remove ${esc(member.identifier)} from project">Remove</button>` : ""}</div>`).join("") || '<p class="project-empty">No work added yet. Add combos and standalone work orders to define this project.</p>'}
         <p class="project-muted project-footnote">Combo operations and overlapping WOs are counted once in project totals. Progress uses operation quantities, not elapsed hours.</p></section>`;
     }
     function renderEditor() {

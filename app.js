@@ -113,6 +113,7 @@ const projectsUI = globalThis.createProjectsUI({
   root: document.querySelector("#projects-root"),
   request: fetchJson,
   download: downloadProjectCsv,
+  renderSequenceTrack: operations => renderMiniSequenceTrack({ operations }),
   isActive: () => state.currentView === "projects" && document.body.dataset.auth === "unlocked",
 });
 
