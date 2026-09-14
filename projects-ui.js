@@ -7,15 +7,10 @@
   const timestamp = value => value ? new Date(value).toLocaleString("en-US", { timeZone: "America/Chicago", timeZoneName: "short" }) : "No upload";
   const button = (action, label, primary = false) => `<button type="button" class="button button-${primary ? "primary" : "secondary"}" data-project-action="${action}">${label}</button>`;
 
-  function operationTable(operations) {
-    return `<div class="project-table-wrap"><table class="project-table"><thead><tr><th>Operation</th><th>Department</th><th>Status</th><th>Quantity complete</th><th>Progress</th><th>Hours left</th></tr></thead><tbody>${operations.map(op => `<tr><td>Op ${esc(op.sequence)} · ${esc(op.operationName)}</td><td>${esc(op.workCenter)}</td><td>${esc(op.status)}</td><td>${number(op.completedQuantity)} / ${number(op.totalQuantity)}</td><td>${number(op.progressPercent)}%</td><td>${number(op.hoursRemaining)}</td></tr>`).join("")}</tbody></table></div>`;
-  }
-
-  function memberContent(member, print = false) {
+  function memberContent(member) {
     return `${member.inferredComplete ? `<p class="project-notice">Completed — absent from latest upload. Last seen ${esc(timestamp(member.lastSeenAt))}. Quantities below are last reported values.</p>` : ""}
       ${member.overlapping ? '<p class="project-notice">Overlapping WOs are counted once in project totals. WOs counted elsewhere are identified below.</p>' : ""}
-      ${member.type === "combo" && member.operations.length ? `<h4>Combo operations — counted once</h4>${operationTable(member.operations)}` : ""}
-      ${member.workOrders.map(wo => `<${print ? "section" : "details"} class="project-wo">${print ? "<h4>" : "<summary>"}<strong>${esc(wo.identifier)}</strong> · ${esc(wo.part)} · ${number(wo.quantity)} units ${!wo.counted ? '<span class="project-tag">Counted elsewhere</span>' : ""}${print ? "</h4>" : "</summary>"}<p>${esc(wo.description)}</p>${operationTable(wo.operations)}</${print ? "section" : "details"}>`).join("")}`;
+      <div class="project-table-wrap"><table class="project-table project-parts-list"><thead><tr><th>Part number</th><th>Quantity</th><th>Internal WO</th></tr></thead><tbody>${member.workOrders.map(wo => `<tr><td>${esc(wo.part || "—")}</td><td>${number(wo.quantity)}</td><td>${esc(wo.identifier)}${!wo.counted ? ' <span class="project-tag">Counted elsewhere</span>' : ""}</td></tr>`).join("")}</tbody></table></div>`;
   }
 
   function cards(detail) {
@@ -92,7 +87,7 @@
         <p class="project-source">${esc(detail.source?.originalName || "No work-center source")} · Uploaded ${esc(timestamp(detail.source?.uploadedAt))}</p>
         ${detail.warning ? `<p class="project-notice" role="status">${esc(detail.warning)}</p>` : ""}${cards(detail)}${departments(detail)}
         <section class="project-panel"><div class="project-heading"><h3>Project scope</h3>${!project.archived ? button("add", "+ Add WOs &amp; Combos") : ""}</div>
-        ${detail.members.map(member => `<div class="project-scope-row"><details data-member-id="${member.id}"${expanded.has(String(member.id)) ? " open" : ""}>${scopeSummary(member)}${memberContent(member)}</details>${!project.archived ? `<button class="project-remove" type="button" data-remove-member="${member.id}" aria-label="Remove ${esc(member.identifier)} from project">Remove</button>` : ""}</div>`).join("") || '<p class="project-empty">No work added yet. Add combos and standalone work orders to define this project.</p>'}
+        ${detail.members.map(member => `<div class="project-scope-row"><details data-member-id="${member.id}"${expanded.has(String(member.id)) ? " open" : ""}>${scopeSummary(member)}${memberContent(member)}${!project.archived ? `<div class="project-scope-actions"><button class="project-remove" type="button" data-remove-member="${member.id}" aria-label="Remove ${esc(member.identifier)} from project">Remove</button></div>` : ""}</details></div>`).join("") || '<p class="project-empty">No work added yet. Add combos and standalone work orders to define this project.</p>'}
         <p class="project-muted project-footnote">Combo operations and overlapping WOs are counted once in project totals. Progress uses operation quantities, not elapsed hours.</p></section>`;
     }
     function renderEditor() {

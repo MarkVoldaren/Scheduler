@@ -36,8 +36,11 @@
 details[open] > .project-scheduler-summary::before { content: '▾'; }
 .project-scheduler-summary .sequencer-row-main { flex: 0 1 150px; overflow-wrap: anywhere; }
 .project-scheduler-track { flex: 1 1 350px; min-width: 0; overflow-x: auto; }
-.project-scheduler-track .mini-track { width: max-content; min-width: 100%; }
-.project-scheduler-track .mini-segment { min-width: 72px; max-width: 110px; }
+.project-scheduler-track .mini-track { width: 100%; min-width: 0; }
+.project-scheduler-track .mini-segment { flex: 1 1 0; min-width: 0; max-width: none; }
+.project-scheduler-track .mini-segment-label { min-width: 0; overflow-wrap: anywhere; }
+.project-parts-list { margin-top: 16px; }
+.project-parts-list td { overflow-wrap: anywhere; }
 @media (max-width: 900px) { .project-scope-row .project-scheduler-summary { flex-wrap: wrap; } .project-scheduler-summary .sequencer-row-main { flex: 1 1 65%; } .project-scheduler-track { order: 3; flex: 1 1 100%; } .project-scheduler-summary .sequencer-row-stats { min-width: 70px; } }
 @media (max-width: 600px) { .project-trend-chart text { font-size: 24px; } }
 .project-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -53,11 +56,12 @@ details[open] > .project-scheduler-summary::before { content: '▾'; }
 .project-departments progress::-webkit-progress-value { background: var(--accent); border-radius: 8px; }
 .project-departments progress::-moz-progress-bar { background: var(--accent); }
 .project-scope-row { border-top: 1px solid var(--divider); padding: 18px 0; position: relative; }
-.project-scope-row > details > summary { cursor: pointer; padding-right: 65px; line-height: 1.8; }
+.project-scope-row > details > summary { cursor: pointer; line-height: 1.8; }
 .project-tag { display: inline-block; font-size: 10px; letter-spacing: .05em; border-radius: 5px; padding: 3px 7px; color: var(--accent); background: var(--accent-soft); margin: 0 8px; }
 .project-description { font-size: 13px; color: var(--text-muted); margin-left: 8px; overflow-wrap: anywhere; }
 .project-row-metric { display: block; margin-left: 20px; font-size: 13px; color: var(--text-muted); }
-.project-remove { position: absolute; right: 0; top: 22px; font: inherit; font-size: 12px; color: var(--text-muted); border: none; background: none; cursor: pointer; padding: 6px; }
+.project-scope-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+.project-remove { font: inherit; font-size: 12px; color: var(--text-muted); border: none; background: none; cursor: pointer; padding: 6px; }
 .project-remove:hover { color: var(--danger); }
 .project-wo { padding: 12px; margin: 12px 0; background: var(--surface-soft); border-radius: 8px; }
 .project-wo summary { cursor: pointer; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
