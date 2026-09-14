@@ -107,6 +107,7 @@ function projectView(members) {
   return {
     members: members.map(member => views.get(member.id)),
     summary: {
+      remainingOperations: allOperations.filter(operation => operation.phase !== "complete").length,
       remainingHours: allOperations.reduce((sum, op) => sum + op.hoursRemaining, 0),
       workOrderCount: quantities.size,
       quantity: [...quantities.values()].reduce((sum, value) => sum + value, 0),

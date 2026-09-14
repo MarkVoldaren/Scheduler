@@ -229,4 +229,12 @@ test("authenticated project APIs persist across viewers, uploads and server rest
   d = await api(`${url}/members/${d.members[0].id}`, "DELETE", { revision: d.project.revision });
   assert.equal(d.members.length, 1);
   assert.equal(d.summary.workOrderCount, 1);
+  const beforeConcurrent = d.trend.readings;
+  await Promise.all([upload(csv([row("W3")])), upload(csv([row("W3")]))]);
+  assert.deepEqual((await api(url)).trend.readings, beforeConcurrent);
+  const Database = require("better-sqlite3");
+  const inspection = new Database(path.join(dataDir, "app.sqlite"), { readonly: true });
+  try {
+    assert.equal(inspection.prepare("SELECT COUNT(*) AS count FROM project_capture_days").get().count, 1);
+  } finally { inspection.close(); }
 });

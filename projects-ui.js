@@ -35,6 +35,29 @@
 
   const printHtml = detail => globalThis.ProjectPrint.buildHtml(detail);
 
+  function trendChart(detail) {
+    const { readings = [], events = [] } = detail.trend || {};
+    const title = '<h3>Remaining operations</h3>';
+    if (!readings.length) return `<section class="project-panel">${title}<p class="project-muted">${detail.members.length ? "Waiting for valid Work Center data to start tracking." : "Add work to start tracking."}</p></section>`;
+    const latest = readings[readings.length - 1];
+    const time = value => Date.parse(`${value}T12:00:00Z`);
+    const start = time(readings[0].date), end = Math.max(time(latest.date), ...events.map(event => time(event.date)));
+    const x = value => end === start ? 390 : 55 + (time(value) - start) / (end - start) * 670;
+    const max = Math.max(1, ...readings.map(point => point.remainingOperations));
+    const y = count => 205 - count / max * 165;
+    const label = point => `${point.date}: ${point.remainingOperations} remaining operations. ${point.type === "baseline" ? "Baseline" : "Daily upload"}. Captured ${timestamp(point.capturedAt)}. Source ${timestamp(point.sourceUploadedAt)}.`;
+    const ticks = [...new Set([0, Math.round(max / 2), max])];
+    return `<section class="project-panel project-trend">${title}<p><strong>${number(latest.remainingOperations)} operations</strong> · Last recorded ${esc(latest.date)}</p>
+      <svg class="project-trend-chart" viewBox="0 0 780 255" role="img" aria-label="Remaining operations over the project lifetime. Full readings are available in the history table below.">
+      ${ticks.map(count => `<line class="trend-grid" x1="55" x2="725" y1="${y(count)}" y2="${y(count)}"/><text x="45" y="${y(count) + 4}" text-anchor="end">${count}</text>`).join("")}
+      ${events.filter(event => time(event.date) >= start).map(event => `<line class="trend-event" x1="${x(event.date)}" x2="${x(event.date)}" y1="25" y2="205"><title>${esc(event.date + ": " + event.description)}</title></line>`).join("")}
+      <polyline class="trend-line" points="${readings.map(point => `${x(point.date)},${y(point.remainingOperations)}`).join(" ")}"/>
+      ${readings.map(point => `<circle class="trend-point" cx="${x(point.date)}" cy="${y(point.remainingOperations)}" r="5" tabindex="0" role="img" aria-label="${esc(label(point))}"><title>${esc(label(point))}</title></circle>`).join("")}
+      <text x="55" y="238">${esc(readings[0].date)}</text>${end !== start ? `<text x="725" y="238" text-anchor="end">${esc(new Date(end).toISOString().slice(0,10))}</text>` : ""}</svg>
+      <p class="project-muted">First accepted Work Center upload each day · Central time. Baselines mark the start of tracking. Counts may differ from live metrics after later uploads or edits. Dashed markers show scope changes; added work can increase the count. Days without uploads have no reading.</p>
+      <details><summary>View trend history and scope changes</summary><div class="project-table-wrap"><table class="project-table"><thead><tr><th>Date</th><th>Operations remaining</th><th>Reading</th><th>Captured</th><th>Source upload</th></tr></thead><tbody>${readings.map(point => `<tr><td>${esc(point.date)}</td><td>${point.remainingOperations}</td><td>${point.type === "baseline" ? "Baseline" : "Daily upload"}</td><td>${esc(timestamp(point.capturedAt))}</td><td>${esc(timestamp(point.sourceUploadedAt))}</td></tr>`).join("")}</tbody></table></div><h4>Scope changes</h4>${events.map(event => `<p class="project-trend-event"><strong>${esc(timestamp(event.occurredAt))}</strong> · ${esc(event.description)}</p>`).join("") || '<p class="project-muted">No scope changes recorded.</p>'}</details></section>`;
+  }
+
   globalThis.createProjectsUI = function ({ root, request, download, isActive }) {
     let projects = [], selectedId = null, detail = null, archived = false;
     let mode = "", candidateList = [], selectedMembers = new Set(), search = "", error = "", notice = "";
@@ -60,6 +83,7 @@
       }
       const project = detail.project;
       dashboard.innerHTML = `<div class="project-heading"><div><h2>${esc(project.name)}${project.archived ? ' <span class="project-tag">Archived</span>' : ""}</h2><p class="project-muted">${esc(project.customer || "No customer specified")} · Target ${esc(date(project.targetDate))}</p></div><div class="project-actions">${button("edit", "Edit details")}${button("archive", project.archived ? "Restore" : "Archive")}${button("print", "Print Project")}${button("download", "Download CSV")}</div></div>
+        ${trendChart(detail)}
         ${project.notes ? `<section class="project-panel"><h3>Project notes</h3><div class="project-notes-text">${esc(project.notes)}</div></section>` : ""}
         <p class="project-source">${esc(detail.source?.originalName || "No work-center source")} · Uploaded ${esc(timestamp(detail.source?.uploadedAt))}</p>
         ${detail.warning ? `<p class="project-notice" role="status">${esc(detail.warning)}</p>` : ""}${cards(detail)}${departments(detail)}

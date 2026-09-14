@@ -82,6 +82,7 @@ function projectSource() {
 const projects = createProjectsStore(db, projectSource);
 const initialProjectSource = projectSource();
 if (initialProjectSource.rows) projects.reconcile(initialProjectSource.rows, initialProjectSource.metadata.uploadedAt);
+projects.initializeTrend();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
@@ -199,7 +200,10 @@ app.post("/api/csv/:kind", upload.single("csv"), (req, res, next) => {
         fs.renameSync(tempPath, activePath);
         replaced = true;
         saveCsvMetadata(metadata);
-        if (workCenterRows) projects.reconcile(workCenterRows, metadata.uploadedAt);
+        if (workCenterRows) {
+          projects.reconcile(workCenterRows, metadata.uploadedAt);
+          projects.captureDaily(metadata.uploadedAt);
+        }
       })();
     } catch (error) {
       if (replaced) {

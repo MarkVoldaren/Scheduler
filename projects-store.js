@@ -3,7 +3,7 @@
 const { memberRows, projectView } = require("./projects-domain");
 const { projectCsv } = require("./projects-csv");
 
-function createProjectsStore(db, getSource) {
+function createProjectsStore(db, getSource, clock = () => new Date()) {
   db.pragma("foreign_keys = ON");
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -18,6 +18,41 @@ function createProjectsStore(db, getSource) {
       last_seen_at TEXT NOT NULL, UNIQUE(project_id, type, identifier)
     );
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_readings (
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      date TEXT NOT NULL, captured_at TEXT NOT NULL, source_uploaded_at TEXT NOT NULL,
+      remaining_operations INTEGER NOT NULL, type TEXT NOT NULL,
+      PRIMARY KEY(project_id, date)
+    );
+    CREATE TABLE IF NOT EXISTS project_capture_days (date TEXT PRIMARY KEY, captured_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS project_scope_events (
+      id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      occurred_at TEXT NOT NULL, date TEXT NOT NULL, description TEXT NOT NULL
+    );
+  `);
+  function event(id, description, at = clock().toISOString()) {
+    db.prepare("INSERT INTO project_scope_events (project_id, occurred_at, date, description) VALUES (?, ?, ?, ?)").run(id, at, chicagoDate(at), description);
+  }
+  function reading(id, type, at, sourceAt) {
+    const scope = members(id);
+    const started = db.prepare("SELECT 1 FROM project_readings WHERE project_id = ? LIMIT 1").get(id);
+    if (!scope.length && !started) return;
+    if (type === "baseline" && started) return;
+    db.prepare("INSERT OR IGNORE INTO project_readings VALUES (?, ?, ?, ?, ?, ?)").run(id, chicagoDate(at), at, sourceAt, projectView(scope).summary.remainingOperations, type);
+  }
+  const initializeTrend = db.transaction(() => {
+    const source = getSource();
+    if (!source.rows || !source.metadata) return;
+    const at = clock().toISOString();
+    db.prepare("SELECT id FROM projects").all().forEach(({ id }) => reading(id, "baseline", at, source.metadata.uploadedAt));
+  });
+  const captureDaily = db.transaction(uploadedAt => {
+    const day = chicagoDate(uploadedAt);
+    const inserted = db.prepare("INSERT OR IGNORE INTO project_capture_days VALUES (?, ?)").run(day, uploadedAt);
+    if (!inserted.changes) return;
+    db.prepare("SELECT id FROM projects").all().forEach(({ id }) => reading(id, "daily", uploadedAt, uploadedAt));
+  });
   if (!db.prepare("PRAGMA table_info(projects)").all().some(column => column.name === "notes")) {
     db.exec("ALTER TABLE projects ADD COLUMN notes TEXT NOT NULL DEFAULT ''");
   }
@@ -41,6 +76,16 @@ function createProjectsStore(db, getSource) {
     const changed = new Set();
     db.prepare("SELECT * FROM project_members").all().forEach(member => {
       const liveRows = memberRows(rows, member.type, member.identifier);
+      if (liveRows.length) {
+        const identifiers = data => [...new Set(data.map(row => String(row["WO #"] || "").trim()).filter(Boolean))].sort();
+        const before = identifiers(JSON.parse(member.snapshot));
+        const after = identifiers(liveRows);
+        if (JSON.stringify(before) !== JSON.stringify(after)) {
+          const added = after.filter(wo => !before.includes(wo));
+          const removed = before.filter(wo => !after.includes(wo));
+          event(member.project_id, `${member.identifier} membership changed on upload. Added WOs: ${added.join(", ") || "none"}. Removed WOs: ${removed.join(", ") || "none"}.`, uploadedAt);
+        }
+      }
       const inferred = liveRows.length ? 0 : 1;
       const snapshot = liveRows.length ? JSON.stringify(liveRows) : member.snapshot;
       const lastSeen = liveRows.length ? uploadedAt : member.last_seen_at;
@@ -53,7 +98,11 @@ function createProjectsStore(db, getSource) {
   });
   function detail(id) {
     const source = getSource();
-    return { project: project(id), ...projectView(members(id)), source: source.metadata, warning: source.warning || "" };
+    const trend = {
+      readings: db.prepare("SELECT date, captured_at AS capturedAt, source_uploaded_at AS sourceUploadedAt, remaining_operations AS remainingOperations, type FROM project_readings WHERE project_id = ? ORDER BY date").all(id),
+      events: db.prepare("SELECT id, date, occurred_at AS occurredAt, description FROM project_scope_events WHERE project_id = ? ORDER BY julianday(occurred_at), id").all(id),
+    };
+    return { project: project(id), ...projectView(members(id)), trend, source: source.metadata, warning: source.warning || "" };
   }
   function list() {
     return { projects: db.prepare("SELECT id FROM projects ORDER BY archived, name COLLATE NOCASE, id").all().map(row => project(row.id)) };
@@ -111,22 +160,25 @@ function createProjectsStore(db, getSource) {
       if (!rows.length || (member.type === "wo" && rows.some(row => String(row["Combo #"] || "").trim()))) fail(400, "Select an available whole combo or standalone WO. The source may have changed; refresh the list.");
       db.prepare("INSERT INTO project_members (project_id, type, identifier, snapshot, last_seen_at) VALUES (?, ?, ?, ?, ?)").run(id, member.type, identifier, JSON.stringify(rows), source.metadata.uploadedAt);
       changed = true;
+      event(id, `Added ${member.type === "combo" ? "combo" : "WO"} ${identifier}.`);
     });
-    if (changed) touch(id);
+    if (changed) { touch(id); reading(id, "baseline", clock().toISOString(), source.metadata.uploadedAt); }
     return detail(id);
   });
   const remove = db.transaction((id, memberId, input) => {
     const current = checkRevision(id, input.revision);
     if (current.archived) fail(400, "Restore this project before changing its scope.");
+    const removed = members(id).find(member => member.id === memberId);
     const result = db.prepare("DELETE FROM project_members WHERE project_id = ? AND id = ?").run(id, memberId);
     if (!result.changes) fail(404, "Project member was not found.");
+    event(id, `Removed ${removed.type === "combo" ? "combo" : "WO"} ${removed.identifier}.`);
     touch(id);
     return detail(id);
   });
   function exportCsv(id) {
     return projectCsv(project(id), members(id), getSource().rows !== null);
   }
-  return { list, detail, create, update, archive, add, remove, candidates, reconcile, exportCsv };
+  return { list, detail, create, update, archive, add, remove, candidates, reconcile, exportCsv, initializeTrend, captureDaily };
 }
 
 function fail(status, message) {
@@ -150,4 +202,9 @@ function validateFields(input) {
   return fields;
 }
 
-module.exports = { createProjectsStore };
+function chicagoDate(value) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
+  const get = type => parts.find(part => part.type === type).value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+module.exports = { createProjectsStore, chicagoDate };
