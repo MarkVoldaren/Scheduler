@@ -66,8 +66,7 @@
     const key = member => `${member.type}:${member.identifier}`;
     function scopeSummary(member) {
       const operations = member.displayOperations || member.operations;
-      const progress = Math.max(0, Math.min(100, member.displayProgress ?? member.progress ?? 0));
-      return `<summary class="project-scheduler-summary"><div class="sequencer-row-main"><div class="sequencer-row-title"><span class="project-tag">${member.type === "combo" ? "COMBO" : "WO"}</span><strong class="sequencer-row-id">${esc(member.identifier)}</strong></div><div class="sequencer-row-meta project-scheduler-description">${esc(member.description)}</div><div class="project-muted">${member.workOrders.length} WOs${member.inferredComplete ? " · Inferred complete" : ""}${member.overlapping ? " · Overlapping WOs counted once in project totals" : ""}</div></div><div class="project-scheduler-track">${renderSequenceTrack ? renderSequenceTrack(operations) : ""}<div class="project-scheduler-progress"><progress max="100" value="${progress}" aria-label="${esc(member.identifier)} production progress"></progress><span>${number(progress)}%</span></div></div><div class="sequencer-row-stats"><strong>${number(member.remainingHours)} h</strong><div class="project-muted">${member.overlapping ? "In project totals" : "Remaining"}</div></div></summary>`;
+      return `<summary class="project-scheduler-summary"><div class="sequencer-row-main"><strong class="sequencer-row-id">${esc(member.identifier)}</strong></div><div class="project-scheduler-track">${renderSequenceTrack ? renderSequenceTrack(operations) : ""}</div><div class="sequencer-row-stats"><strong>${number(member.remainingHours)} h</strong><div class="project-muted">${member.overlapping ? "In project totals" : "Remaining"}</div></div></summary>`;
     }
     function status() {
       const target = root.querySelector(".project-status");
