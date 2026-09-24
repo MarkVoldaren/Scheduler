@@ -330,6 +330,7 @@ function bindEvents() {
     setKpiSortBy(state, event.target.value);
     renderKpiSurface();
   });
+  bindManningOverviewInteractions(refs.kpiBoardRoot);
   refs.kpiBoardRoot.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) {
       return;
@@ -1448,7 +1449,7 @@ function getAverageEffectiveDailyCapacity(targetState, center, startDate, dayCou
   return days > 0 ? getRollingEffectiveCapacity(targetState, center, startDate, days) / days : 0;
 }
 
-function getNeededManningForDepartment(targetState, department, horizonDays = targetState.filters.kpiHorizonDays, currentOnly = false) {
+function getNeededManningForDepartment(targetState, department, horizonDays = targetState.filters.kpiHorizonDays, currentOnly = false, excludePastDue = false) {
   const days = Math.max(1, Number(horizonDays) || 1);
   const today = startOfToday();
   const horizonEnd = addDays(today, days - 1);
@@ -1458,7 +1459,7 @@ function getNeededManningForDepartment(targetState, department, horizonDays = ta
 
   targetState.jobs.forEach((job) => {
     const dueDate = isKnownDate(job.shipByDate) ? stripTime(job.shipByDate) : demandEnd;
-    if (dueDate > demandEnd) {
+    if (dueDate > demandEnd || (excludePastDue && dueDate < today)) {
       return;
     }
 
@@ -2857,10 +2858,36 @@ function getKpiBoardViewModel(targetState) {
     currentOnly,
     sortBy,
     summary,
+    manningOverview: createManningOverview(targetState, horizonDays, currentOnly),
     departments: sortedDepartments,
     flowGroups,
     bottlenecks,
     attentionItems,
+  };
+}
+
+function createManningOverview(targetState, horizonDays, currentOnly) {
+  const departments = targetState.workCenters.map((department) => {
+    const settings = getDepartmentCapacitySettings(targetState, department);
+    return {
+      department,
+      flowLocation: getDepartmentFlowLocation(targetState, department),
+      currentManning: settings.currentManning,
+      temporaryManning: settings.temporaryManning,
+      neededManning: getNeededManningForDepartment(targetState, department, horizonDays, currentOnly),
+      neededManningWithoutPastDue: getNeededManningForDepartment(targetState, department, horizonDays, currentOnly, true),
+    };
+  }).sort((a, b) => a.department.localeCompare(b.department));
+  const sum = (items) => items.reduce((totals, item) => {
+    Object.keys(totals).forEach((key) => { totals[key] += item[key]; });
+    return totals;
+  }, { currentManning: 0, neededManning: 0, neededManningWithoutPastDue: 0, temporaryManning: 0 });
+  return {
+    totals: sum(departments),
+    groups: FLOW_LOCATION_OPTIONS.map((flowLocation) => {
+      const members = departments.filter((item) => item.flowLocation === flowLocation);
+      return { flowLocation, departments: members, totals: sum(members) };
+    }),
   };
 }
 
@@ -4400,7 +4427,7 @@ function getFlowLocationMeta(flowLocation) {
 function renderKpiBoard(targetRefs, viewModel) {
   renderKpiControls(targetRefs, viewModel);
 
-  if (!viewModel.summary || !viewModel.departments.length) {
+  if (!viewModel.summary) {
     targetRefs.kpiBoardRoot.innerHTML = createEmptyState(viewModel.emptyMessage);
     return;
   }
@@ -4414,6 +4441,8 @@ function renderKpiBoard(targetRefs, viewModel) {
       ${createSummaryKpiCard("Overloaded Departments", String(viewModel.summary.overloadedDepartmentCount), "> 100% utilization", "alert", viewModel.summary.overloadedDepartmentCount ? "red" : "blue")}
       ${createSummaryKpiCard("Past Due Hours", `${formatHours(viewModel.summary.pastDueHours)} hrs`, `across ${viewModel.summary.departmentCount} departments`, "calendar", viewModel.summary.pastDueHours ? "amber" : "blue")}
     </section>
+    ${createManningOverviewCard(viewModel)}
+    ${!viewModel.departments.length ? createEmptyState(viewModel.emptyMessage) : ""}
     <section class="kpi-flow-board">
       ${viewModel.flowGroups.map(createFlowLocationSection).join("")}
     </section>
@@ -4972,6 +5001,70 @@ function createSchedulerRow(row) {
       </div>
     </div>
   `;
+}
+
+function createManningOverviewCard(viewModel) {
+  const headings = `<th scope="col">Current Manning</th><th scope="col">Needed Manning</th><th scope="col">Needed Manning<br>without Past Due</th><th scope="col">Temp Manning</th>`;
+  const cells = (item) => [item.currentManning, item.neededManning, item.neededManningWithoutPastDue, item.temporaryManning]
+    .map((value) => `<td>${formatManning(value)}</td>`).join("");
+  return `<article class="kpi-table-panel kpi-manning-overview" aria-labelledby="manning-overview-title">
+    <h3 id="manning-overview-title">Manning Overview</h3>
+    <p class="kpi-board-subtitle">All departments · Next ${viewModel.horizonDays} days · ${viewModel.currentOnly ? "Current operations only" : "All open operations"}. Staffing shown in FTE; temporary staffing is separate from current manning.</p>
+    <p class="kpi-manning-hint">Hover, focus, or select a flow location to see its departments.</p>
+    <div class="kpi-table-scroll"><table class="kpi-table kpi-manning-table">
+      <thead><tr><th scope="col">Flow Location</th>${headings}</tr></thead>
+      ${viewModel.manningOverview.groups.map((group, index) => `<tbody data-manning-group class="kpi-flow-${slugify(group.flowLocation)}">
+        <tr class="kpi-manning-row"><th scope="row"><button type="button" data-manning-toggle aria-expanded="false" aria-controls="manning-details-${index}"><span class="kpi-flow-dot" aria-hidden="true"></span>${escapeHtml(group.flowLocation)}</button></th>${cells(group.totals)}</tr>
+        <tr id="manning-details-${index}" data-manning-panel hidden><td colspan="5">
+          <section class="kpi-manning-details" aria-label="${escapeHtml(group.flowLocation)} department manning">
+            ${group.departments.length ? `<table class="kpi-table"><thead><tr><th scope="col">Department</th>${headings}</tr></thead><tbody>${group.departments.map((department) => `<tr><th scope="row">${escapeHtml(department.department)}</th>${cells(department)}</tr>`).join("")}</tbody></table>` : `<p>No departments assigned</p>`}
+          </section>
+        </td></tr>
+      </tbody>`).join("")}
+      <tfoot><tr><th scope="row">All Departments</th>${cells(viewModel.manningOverview.totals)}</tr></tfoot>
+    </table></div>
+  </article>`;
+}
+
+function bindManningOverviewInteractions(root) {
+  const setOpen = (group, open) => {
+    group.querySelector("[data-manning-toggle]").setAttribute("aria-expanded", String(open));
+    group.querySelector("[data-manning-panel]").hidden = !open;
+    if (!open) delete group.dataset.pinned;
+  };
+  const closeAll = (except = null) => root.querySelectorAll("[data-manning-group]").forEach((group) => {
+    if (group !== except) setOpen(group, false);
+  });
+  const openGroup = (group) => { closeAll(group); setOpen(group, true); };
+  root.addEventListener("pointerover", (event) => {
+    const group = event.target.closest?.("[data-manning-group]");
+    if (group && event.pointerType !== "touch" && !group.contains(event.relatedTarget)) openGroup(group);
+  });
+  root.addEventListener("pointerout", (event) => {
+    const group = event.target.closest?.("[data-manning-group]");
+    if (group && !group.contains(event.relatedTarget) && !group.dataset.pinned && !group.contains(document.activeElement)) setOpen(group, false);
+  });
+  root.addEventListener("focusin", (event) => {
+    const group = event.target.closest?.("[data-manning-group]");
+    if (group) openGroup(group);
+  });
+  root.addEventListener("focusout", (event) => {
+    const group = event.target.closest?.("[data-manning-group]");
+    if (group && !group.contains(event.relatedTarget) && !group.dataset.pinned) setOpen(group, false);
+  });
+  root.addEventListener("click", (event) => {
+    const toggle = event.target.closest?.("[data-manning-toggle]");
+    if (!toggle) return;
+    const group = toggle.closest("[data-manning-group]");
+    if (group.dataset.pinned) setOpen(group, false);
+    else { openGroup(group); group.dataset.pinned = "true"; }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeAll();
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest?.("[data-manning-group]")) closeAll();
+  });
 }
 
 function createSummaryKpiCard(title, value, detail, icon, tone) {

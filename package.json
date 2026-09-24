@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "check": "node --check server.js && node --check app.js && node --check scheduler-core.js && node --check projects-domain.js && node --check projects-store.js && node --check projects-csv.js && node --check projects-ui.js && node --check projects-print.js",
-    "test": "node --test tests"
+    "test": "node --test"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
