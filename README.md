@@ -165,3 +165,15 @@ Sign in with the normal app password, then open **Capacity** and enter the separ
 Only unlocked admin sessions can save shared capacity settings. Other pages continue reading those settings for scheduling calculations, and normal CSV uploads and Projects access are unchanged. Set `ADMIN_PASSWORD` in the deployment `.env` and recreate the container to apply configuration changes; no database migration is required. To invalidate existing signed sessions immediately, rotate `SESSION_SECRET` as well.
 
 `GET /api/session` includes `adminAuthenticated`. Authenticated `POST /api/admin/unlock` accepts `{ password }` and grants admin access on success; invalid or unconfigured admin access returns 403. `PUT /api/settings` requires both app and admin authentication (401 without an app session, 403 without admin access).
+
+## People
+
+People is a shared roster of recurring weekly schedules, separate from Capacity and KPI staffing. Signed-in users can search by name, filter departments, and view active or archived people. Administrators unlock editing using the existing admin password and can add, edit, archive, and restore records.
+
+Each person has Monday–Sunday hours (0–24 per day, up to two decimals) and one or more departments. A single department receives 100%; multiple allocations must be positive and total exactly 100%. Department hours are calculated from the same percentage on each day. Weekly roster totals count each person once. Hours and percentages are persisted as integer hundredths/basis points; allocated hours are rounded only for display.
+
+Department choices follow the scheduler's open work centers. Saved assignments survive later CSV changes and are labeled unavailable when absent from the current schedule. Such assignments may be retained or removed; new assignments require an available department. People remains readable without a Work Center CSV.
+
+Records are stored in the existing SQLite database. Startup creates the People table additively; no existing settings are migrated or overwritten. Concurrent edits use record revisions: stale saves fail and offer a refresh rather than overwrite another user's changes. Archives can be restored; there is no permanent delete or date-specific history.
+
+API: authenticated `GET /api/people`; admin-only `POST /api/people`, `PUT /api/people/:id`, and `PUT /api/people/:id/archive`. Write payloads contain `name`, `hours` keyed by `mon`–`sun`, and `allocations` with `department`/`percent`; edits require `revision`. Archive/restore accepts `revision` and `archived`. Lists return `people` and `departments`.

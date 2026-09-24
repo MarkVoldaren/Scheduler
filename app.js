@@ -117,6 +117,21 @@ const projectsUI = globalThis.createProjectsUI({
   isActive: () => state.currentView === "projects" && document.body.dataset.auth === "unlocked",
 });
 
+const peopleUI = globalThis.createPeopleUI({
+  root: document.querySelector("#people-root"), request: fetchJson,
+  isAdmin: () => state.adminAuthenticated,
+  isActive: () => state.currentView === "people" && document.body.dataset.auth === "unlocked",
+  lock: () => setAdminAuthenticated(false),
+  unlock: async (password) => {
+    const generation = state.authGeneration;
+    await fetchJson("/api/admin/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+    const appState = await fetchJson("/api/app-state");
+    if (generation !== state.authGeneration) return;
+    applyServerOperationalSettings(appState.settings || {});
+    syncCapacities(state); syncFlowLocations(state); setAdminAuthenticated(true);
+  },
+});
+
 async function downloadProjectCsv(url) {
   const response = await fetch(resolveApiUrl(url), { credentials: "same-origin", cache: "no-store" });
   if (response.status === 401) { setAuthenticated(false, "Your session expired. Sign in again."); throw new Error("Session expired."); }
@@ -314,6 +329,7 @@ function bindEvents() {
   refs.viewPickList.addEventListener("click", () => switchView("pick-list"));
   refs.viewExpedite.addEventListener("click", () => switchView("expedite"));
   document.querySelector("#view-projects").addEventListener("click", () => switchView("projects"));
+  document.querySelector("#view-people").addEventListener("click", () => switchView("people"));
   refs.kpiDepartmentGroup.addEventListener("change", (event) => {
     setKpiDepartmentGroup(state, event.target.value);
     renderKpiSurface();
@@ -675,6 +691,7 @@ async function loginWithPassword(password) {
 }
 
 async function logout() {
+  if (state.currentView === "people" && !peopleUI.canLeave()) return;
   setAuthenticated(false);
   projectsUI.clear();
   try {
@@ -695,6 +712,7 @@ async function logout() {
 
 function setAuthenticated(isAuthenticated, message = "") {
   state.authGeneration += 1;
+  if (!isAuthenticated && typeof peopleUI !== "undefined") peopleUI.clear();
   if (!isAuthenticated) setAdminAuthenticated(false);
   document.body.dataset.auth = isAuthenticated ? "unlocked" : "locked";
   refs.loginScreen.hidden = isAuthenticated;
@@ -718,6 +736,7 @@ function setAdminAuthenticated(value) {
   document.querySelector("#admin-unlock-error").hidden = true;
   document.querySelector("#capacity-save-error").hidden = true;
   refs.capacityGrid.hidden = !state.adminAuthenticated;
+  if (typeof peopleUI !== "undefined") peopleUI.authChanged();
 }
 
 async function unlockCapacity(event) {
@@ -954,6 +973,11 @@ function hydrateShippingCsv(text, sourceName) {
 }
 
 function renderActiveSurface() {
+  if (state.currentView === "people") {
+    renderSharedChrome(refs, state);
+    peopleUI.refresh();
+    return;
+  }
   if (state.currentView === "projects") {
     renderSharedChrome(refs, state);
     projectsUI.refresh();
@@ -1019,6 +1043,10 @@ function renderExpediteSurface() {
 }
 
 function switchView(view) {
+  if (state.currentView === "people" && view !== "people") {
+    if (!peopleUI.canLeave()) return;
+    peopleUI.leave();
+  }
   setCurrentView(state, view);
   renderActiveSurface();
   closeMobileSidebar(refs);
@@ -1157,7 +1185,7 @@ function setPartialsOnly(targetState, checked) {
 }
 
 function setCurrentView(targetState, view) {
-  targetState.currentView = ["capacity", "departments", "kpi", "pick-list", "expedite", "projects"].includes(view) ? view : "sequencers";
+  targetState.currentView = ["capacity", "departments", "kpi", "pick-list", "expedite", "projects", "people"].includes(view) ? view : "sequencers";
 }
 
 function ensureSelectedSchedulerCenter(targetState) {
@@ -3664,6 +3692,7 @@ function renderSharedChrome(targetRefs, targetState) {
 
   const views = [
     { id: "projects", button: document.querySelector("#view-projects"), page: document.querySelector("#page-projects") },
+    { id: "people", button: document.querySelector("#view-people"), page: document.querySelector("#page-people") },
     { id: "capacity", button: targetRefs.viewCapacity, page: targetRefs.pageCapacity },
     { id: "departments", button: targetRefs.viewDepartments, page: targetRefs.pageDepartments },
     { id: "kpi", button: targetRefs.viewKpi, page: targetRefs.pageKpi },

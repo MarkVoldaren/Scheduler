@@ -8,6 +8,8 @@ const express = require("express");
 const multer = require("multer");
 const { readWorkCenter } = require("./projects-domain");
 const { createProjectsStore } = require("./projects-store");
+const { createPeopleStore } = require("./people-store");
+const schedulerCore = require("./scheduler-core");
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -85,6 +87,13 @@ function projectSource() {
   }
 }
 const projects = createProjectsStore(db, projectSource);
+const people = createPeopleStore(db, () => {
+  const { rows } = projectSource();
+  if (!rows) return [];
+  return [...new Set(schedulerCore.buildJobs(rows).flatMap(job => job.operations)
+    .filter(operation => operation.phase !== "complete" && operation.hoursRemaining > 0 && operation.workCenter)
+    .map(operation => operation.workCenter))].sort((a, b) => a.localeCompare(b));
+});
 const initialProjectSource = projectSource();
 if (initialProjectSource.rows) projects.reconcile(initialProjectSource.rows, initialProjectSource.metadata.uploadedAt);
 projects.initializeTrend();
@@ -137,6 +146,11 @@ app.post("/api/admin/unlock", (req, res) => {
 });
 
 app.get("/api/projects", (req, res) => res.json(projects.list()));
+app.get("/api/people", (req, res) => { setNoCacheHeaders(res); res.json(people.list()); });
+const requirePeopleAdmin = (req, res, next) => isAdmin(req) ? next() : res.status(403).json({ error: "Admin access required" });
+app.post("/api/people", requirePeopleAdmin, (req, res) => res.status(201).json(people.create(req.body || {})));
+app.put("/api/people/:id", requirePeopleAdmin, (req, res) => res.json(people.update(req.params.id, req.body || {})));
+app.put("/api/people/:id/archive", requirePeopleAdmin, (req, res) => res.json(people.archive(req.params.id, req.body || {})));
 app.get("/api/projects/candidates", (req, res) => res.json(projects.candidates()));
 app.get("/api/projects/:id", (req, res) => res.json(projects.detail(projectId(req.params.id))));
 app.get("/api/projects/:id/export.csv", (req, res) => {
@@ -245,6 +259,8 @@ app.put("/api/settings", (req, res) => {
 // Serve browser assets only. In particular, the shared project database and
 // server-side modules must never be downloadable through the static root.
 const publicFiles = new Set(["/", "/index.html", "/app.js", "/styles.css", "/scheduler-core.js", "/projects-ui.js", "/projects-print.js", "/main.js", "/csv.js", "/domain.js", "/render.js", "/selectors.js", "/state.js"]);
+publicFiles.add("/people-ui.js");
+publicFiles.add("/people-domain.js");
 const publicAssets = express.static(__dirname, {
   extensions: ["html"],
   etag: false,

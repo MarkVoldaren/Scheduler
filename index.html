@@ -49,6 +49,9 @@
             <span class="sidebar-link-icon">C</span>
             <span class="sidebar-link-label">Capacity <span id="capacity-lock-indicator">(Locked)</span></span>
           </button>
+          <button id="view-people" class="sidebar-link" type="button" data-view="people" aria-pressed="false">
+            <span class="sidebar-link-icon">Pe</span><span class="sidebar-link-label">People</span>
+          </button>
           <button id="view-kpi" class="sidebar-link" type="button" data-view="kpi" aria-pressed="false">
             <span class="sidebar-link-icon">K</span>
             <span class="sidebar-link-label">KPI Board</span>
@@ -101,6 +104,7 @@
 
         <div class="workspace-grid">
           <main class="workspace-main">
+            <section class="page-view" id="page-people" data-page="people"><div id="people-root" class="people-root"></div></section>
             <section class="page-view" id="page-projects" data-page="projects">
               <div id="projects-root" class="projects-root"></div>
             </section>
@@ -323,6 +327,8 @@
     <script src="scheduler-core.js"></script>
     <script src="projects-ui.js"></script>
     <script src="projects-print.js"></script>
+    <script src="people-domain.js"></script>
+    <script src="people-ui.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

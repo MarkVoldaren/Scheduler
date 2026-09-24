@@ -4125,3 +4125,33 @@ body[data-modal-open="true"] {
 #capacity-grid[hidden] {
   display: none;
 }
+
+.people-root { padding: 24px; max-width: 1500px; margin: auto; color: var(--text); min-width: 0; }
+.people-heading, .people-actions, .people-filters { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.people-heading { justify-content: space-between; margin-bottom: 20px; }
+.people-heading h1 { margin: 4px 0 8px; }
+.people-heading p, .people-notice { color: var(--text-muted); }
+.people-root label { display: grid; gap: 7px; font-size: 13px; }
+.people-root input, .people-root select { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--panel-border-strong); border-radius: 8px; background: var(--input-bg); color: var(--text); font: inherit; }
+.people-root input:focus-visible, .people-root select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.people-filters { align-items: end; margin-bottom: 20px; }
+.people-filters label:first-child { flex: 1 1 200px; }
+.people-table-scroll { overflow-x: auto; border: 1px solid var(--panel-border); border-radius: 12px; background: var(--surface); }
+.people-table { width: 100%; min-width: 980px; border-collapse: collapse; text-align: left; font-size: 13px; }
+.people-table th, .people-table td { padding: 14px 12px; border-bottom: 1px solid var(--panel-border); }
+.people-table thead { background: var(--surface-strong); }
+.people-table td:nth-child(n+3) { font-variant-numeric: tabular-nums; }
+.people-table .button { padding: 7px 10px; margin: 2px; }
+.people-department { margin: 5px 0; white-space: nowrap; }
+.people-department small { display: block; color: var(--text-muted); }
+.people-total { font-weight: 600; }
+.people-editor { padding: 22px; border: 1px solid var(--panel-border-strong); background: var(--surface); border-radius: 12px; }
+.people-editor fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.people-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.people-allocation { display: grid; grid-template-columns: minmax(160px, 2fr) minmax(90px, 1fr) auto auto; align-items: end; gap: 12px; margin-bottom: 14px; }
+.people-allocation output { padding: 10px 0; font-size: 13px; }
+.people-actions { margin-top: 20px; }
+.people-status { min-height: 20px; }
+.people-status.is-error { color: var(--danger); }
+#people-unlock { display: flex; gap: 12px; align-items: end; margin: 16px 0; }
+@media (max-width: 700px) { .people-root { padding: 12px; } .people-days { grid-template-columns: repeat(4, minmax(0, 1fr)); } .people-allocation { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); } }
