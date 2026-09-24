@@ -14,6 +14,7 @@ Scheduler Operations is a vanilla HTML/CSS/JS production scheduling app served b
 
    ```powershell
    $env:APP_PASSWORD="change-this"
+   $env:ADMIN_PASSWORD="use-a-different-admin-password"
    $env:SESSION_SECRET="use-a-long-random-secret"
    npm start
    ```
@@ -70,6 +71,7 @@ Use Node 20, matching Docker, for the existing native SQLite dependency. Run `np
 ## Environment Variables
 
 - `APP_PASSWORD`: shared password required to enter the app.
+- `ADMIN_PASSWORD`: separate shared password to unlock Capacity. No default; when omitted, Capacity stays locked and the rest of the app works. Must differ from `APP_PASSWORD` or the server refuses to start.
 - `SESSION_SECRET`: long random string used to sign the HTTP-only session cookie.
 - `HOST`: bind host, defaults to `127.0.0.1`; use `0.0.0.0` inside Docker.
 - `PORT`: server port, defaults to `3000`.
@@ -103,6 +105,7 @@ Set real values in `.env`:
 
 ```bash
 APP_PASSWORD=replace-with-your-shared-password
+ADMIN_PASSWORD=replace-with-a-separate-admin-password
 SESSION_SECRET=replace-with-a-long-random-secret
 ```
 
@@ -154,3 +157,11 @@ docker compose restart caddy
 ```
 
 Back up `data/app.sqlite` and `data/uploads/*.csv` if you need to preserve the current operational state before replacing or moving the droplet.
+
+## Capacity admin access
+
+Sign in with the normal app password, then open **Capacity** and enter the separate admin password. Capacity stays unlocked across refreshes for the existing 12-hour app session. Logout, session expiration, or a fresh app login clears admin access. Existing sessions start without admin access after this feature is deployed.
+
+Only unlocked admin sessions can save shared capacity settings. Other pages continue reading those settings for scheduling calculations, and normal CSV uploads and Projects access are unchanged. Set `ADMIN_PASSWORD` in the deployment `.env` and recreate the container to apply configuration changes; no database migration is required. To invalidate existing signed sessions immediately, rotate `SESSION_SECRET` as well.
+
+`GET /api/session` includes `adminAuthenticated`. Authenticated `POST /api/admin/unlock` accepts `{ password }` and grants admin access on success; invalid or unconfigured admin access returns 403. `PUT /api/settings` requires both app and admin authentication (401 without an app session, 403 without admin access).

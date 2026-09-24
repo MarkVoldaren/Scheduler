@@ -15,6 +15,7 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 const DB_PATH = process.env.SQLITE_PATH || path.join(DATA_DIR, "app.sqlite");
 const APP_PASSWORD = process.env.APP_PASSWORD || (process.env.NODE_ENV === "production" ? "" : "changeme");
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || (process.env.NODE_ENV === "production" ? "" : "dev-session-secret-change-me");
 const SESSION_COOKIE_NAME = "scheduler-session";
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 50 * 1024 * 1024);
@@ -46,6 +47,10 @@ const HORIZON_SHIFT_OPTIONS = new Set([0, 1, 2, 3, 5, 7, 10, 14]);
 
 if (!APP_PASSWORD || !SESSION_SECRET) {
   console.error("APP_PASSWORD and SESSION_SECRET must be set in production.");
+  process.exit(1);
+}
+if (ADMIN_PASSWORD && safeCompare(ADMIN_PASSWORD, APP_PASSWORD)) {
+  console.error("ADMIN_PASSWORD must differ from APP_PASSWORD.");
   process.exit(1);
 }
 
@@ -102,7 +107,8 @@ app.use(
 );
 
 app.get("/api/session", (req, res) => {
-  res.json({ authenticated: Boolean(req.session && req.session.authenticated) });
+  setNoCacheHeaders(res);
+  res.json({ authenticated: Boolean(req.session && req.session.authenticated), adminAuthenticated: isAdmin(req) });
 });
 
 app.post("/api/login", (req, res) => {
@@ -110,16 +116,25 @@ app.post("/api/login", (req, res) => {
   if (!safeCompare(password, APP_PASSWORD)) {
     return res.status(401).json({ error: "Invalid password" });
   }
-  req.session.authenticated = true;
-  res.json({ authenticated: true });
+  req.session = { authenticated: true, adminAuthenticated: false };
+  res.json({ authenticated: true, adminAuthenticated: false });
 });
 
 app.post("/api/logout", (req, res) => {
   req.session = null;
-  res.json({ authenticated: false });
+  res.json({ authenticated: false, adminAuthenticated: false });
 });
 
 app.use("/api", requireAuth);
+
+app.post("/api/admin/unlock", (req, res) => {
+  if (!ADMIN_PASSWORD) return res.status(403).json({ error: "Admin access is not configured. Contact the app administrator." });
+  if (!safeCompare(String(req.body?.password || ""), ADMIN_PASSWORD)) {
+    return res.status(403).json({ error: "Invalid admin password" });
+  }
+  req.session.adminAuthenticated = true;
+  res.json({ authenticated: true, adminAuthenticated: true });
+});
 
 app.get("/api/projects", (req, res) => res.json(projects.list()));
 app.get("/api/projects/candidates", (req, res) => res.json(projects.candidates()));
@@ -221,6 +236,7 @@ app.post("/api/csv/:kind", upload.single("csv"), (req, res, next) => {
 });
 
 app.put("/api/settings", (req, res) => {
+  if (!isAdmin(req)) return res.status(403).json({ error: "Admin access required" });
   const settings = sanitizeOperationalSettings(req.body || {});
   saveOperationalSettings(settings);
   res.json({ settings });
@@ -262,6 +278,10 @@ function requireAuth(req, res, next) {
     return next();
   }
   return res.status(401).json({ error: "Session required" });
+}
+
+function isAdmin(req) {
+  return Boolean(ADMIN_PASSWORD && req.session?.authenticated && req.session?.adminAuthenticated);
 }
 
 function projectId(value) {

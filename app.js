@@ -146,6 +146,8 @@ async function init() {
 
 function createInitialState() {
   return {
+    adminAuthenticated: false,
+    authGeneration: 0,
     rawRows: [],
     jobs: [],
     shippingRows: [],
@@ -305,6 +307,8 @@ function bindEvents() {
   refs.themeToggle.addEventListener("click", toggleTheme);
   refs.viewSequencers.addEventListener("click", () => switchView("sequencers"));
   refs.viewCapacity.addEventListener("click", () => switchView("capacity"));
+  document.querySelector("#admin-unlock-form").addEventListener("submit", unlockCapacity);
+  document.querySelector("#admin-return").addEventListener("click", () => switchView("sequencers"));
   refs.viewKpi.addEventListener("click", () => switchView("kpi"));
   refs.viewDepartments.addEventListener("click", () => switchView("departments"));
   refs.viewPickList.addEventListener("click", () => switchView("pick-list"));
@@ -401,6 +405,7 @@ function bindEvents() {
   refs.sidebarScrim.addEventListener("click", () => closeMobileSidebar(refs));
 
   refs.capacityGrid.addEventListener("input", (event) => {
+    if (!state.adminAuthenticated) return;
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) {
       return;
@@ -419,6 +424,7 @@ function bindEvents() {
   });
 
   refs.capacityGrid.addEventListener("change", (event) => {
+    if (!state.adminAuthenticated) return;
     const target = event.target;
     if (target instanceof HTMLInputElement && target.dataset.capacityCompact !== undefined) {
       setCapacityCompactView(state, target.checked);
@@ -466,6 +472,7 @@ function bindEvents() {
   });
 
   refs.capacityGrid.addEventListener("keydown", (event) => {
+    if (!state.adminAuthenticated) return;
     const target = event.target;
     if (!(target instanceof HTMLInputElement) || !isCapacityValueInput(target)) {
       return;
@@ -487,6 +494,7 @@ function bindEvents() {
   });
 
   refs.capacityGrid.addEventListener("click", (event) => {
+    if (!state.adminAuthenticated) return;
     const target = event.target;
     if (!(target instanceof Element)) {
       return;
@@ -634,6 +642,7 @@ async function initializeServerSession() {
       return;
     }
     setAuthenticated(true);
+    setAdminAuthenticated(session.adminAuthenticated);
     await loadServerAppState();
   } catch (error) {
     console.error(error);
@@ -656,6 +665,7 @@ async function loginWithPassword(password) {
     }
     refs.loginPassword.value = "";
     setAuthenticated(true);
+    setAdminAuthenticated(session.adminAuthenticated);
     await loadServerAppState();
   } catch (error) {
     console.error(error);
@@ -664,6 +674,7 @@ async function loginWithPassword(password) {
 }
 
 async function logout() {
+  setAuthenticated(false);
   projectsUI.clear();
   try {
     await fetchJson("/api/logout", { method: "POST", allowUnauthorized: true });
@@ -682,11 +693,62 @@ async function logout() {
 }
 
 function setAuthenticated(isAuthenticated, message = "") {
+  state.authGeneration += 1;
+  if (!isAuthenticated) setAdminAuthenticated(false);
   document.body.dataset.auth = isAuthenticated ? "unlocked" : "locked";
   refs.loginScreen.hidden = isAuthenticated;
   if (!isAuthenticated) {
     setLoginError(message);
     refs.loginPassword.focus();
+  }
+}
+
+function setAdminAuthenticated(value) {
+  state.adminAuthenticated = Boolean(value);
+  if (!state.adminAuthenticated) {
+    window.clearTimeout(state.settingsSaveTimer);
+    state.settingsSaveTimer = null;
+    refs.capacityGrid.replaceChildren();
+  }
+  document.querySelector("#capacity-lock-indicator").hidden = state.adminAuthenticated;
+  refs.viewCapacity.setAttribute("aria-label", state.adminAuthenticated ? "Capacity" : "Capacity (Locked)");
+  document.querySelector("#admin-unlock-form").hidden = state.adminAuthenticated;
+  document.querySelector("#admin-password").value = "";
+  document.querySelector("#admin-unlock-error").hidden = true;
+  document.querySelector("#capacity-save-error").hidden = true;
+  refs.capacityGrid.hidden = !state.adminAuthenticated;
+}
+
+async function unlockCapacity(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('[type="submit"]');
+  const input = document.querySelector("#admin-password");
+  const errorElement = document.querySelector("#admin-unlock-error");
+  const generation = state.authGeneration;
+  button.disabled = true;
+  errorElement.hidden = true;
+  try {
+    await fetchJson("/api/admin/unlock", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: input.value }),
+    });
+    // Refresh before enabling edits, so this browser cannot overwrite newer settings.
+    const appState = await fetchJson("/api/app-state");
+    if (generation !== state.authGeneration) return;
+    applyServerOperationalSettings(appState.settings || {});
+    syncCapacities(state);
+    syncFlowLocations(state);
+    setAdminAuthenticated(true);
+    renderActiveSurface();
+  } catch (error) {
+    if (generation !== state.authGeneration) return;
+    errorElement.textContent = error.message || "Unable to unlock Capacity.";
+    errorElement.hidden = false;
+    input.focus();
+  } finally {
+    input.value = "";
+    button.disabled = false;
   }
 }
 
@@ -760,7 +822,9 @@ async function fetchJson(url, options = {}) {
     payload = {};
   }
   if (!response.ok) {
-    throw new Error(payload.error || `Request failed with status ${response.status}`);
+    const error = new Error(payload.error || `Request failed with status ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -832,6 +896,7 @@ function isCapacityValueInput(input) {
 }
 
 function commitCapacityValueInput(input) {
+  if (!state.adminAuthenticated) return;
   const rawValue = normalizeCapacityInputText(input.value);
   if (input.dataset.machineCenter !== undefined) {
     updateMachineCapacityPerDay(state, input.dataset.machineCenter, rawValue);
@@ -928,6 +993,7 @@ function renderSchedulerSurface() {
 
 function renderCapacitySurface() {
   renderSharedChrome(refs, state);
+  if (!state.adminAuthenticated) return;
   renderCapacity(refs, getCapacityViewModel(state));
 }
 
@@ -955,6 +1021,7 @@ function switchView(view) {
   setCurrentView(state, view);
   renderActiveSurface();
   closeMobileSidebar(refs);
+  if (view === "capacity" && !state.adminAuthenticated) document.querySelector("#admin-password").focus();
 }
 
 function applyInitialTheme() {
@@ -1772,7 +1839,7 @@ function saveOperationalSetting(serverKey, storageKey, value) {
 }
 
 function queueServerSettingsSave() {
-  if (!state.usesServerSettings) {
+  if (!state.usesServerSettings || !state.adminAuthenticated) {
     return;
   }
   window.clearTimeout(state.settingsSaveTimer);
@@ -1780,6 +1847,8 @@ function queueServerSettingsSave() {
 }
 
 async function saveServerSettingsNow() {
+  if (!state.adminAuthenticated) return;
+  const generation = state.authGeneration;
   try {
     const settings = getOperationalSettingsPayload();
     const payload = await fetchJson("/api/settings", {
@@ -1787,8 +1856,15 @@ async function saveServerSettingsNow() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     });
+    if (generation !== state.authGeneration) return;
     state.serverSettings = normalizeOperationalSettings(payload.settings || settings);
+    document.querySelector("#capacity-save-error").hidden = true;
   } catch (error) {
+    if (generation !== state.authGeneration) return;
+    if (error.status === 403) setAdminAuthenticated(false);
+    const errorElement = document.querySelector(error.status === 403 ? "#admin-unlock-error" : "#capacity-save-error");
+    errorElement.textContent = `Capacity settings were not saved. ${error.message}`;
+    errorElement.hidden = false;
     console.error("Failed to save shared settings.", error);
   }
 }
@@ -3625,6 +3701,7 @@ function renderScheduler(targetRefs, viewModel) {
 }
 
 function renderCapacity(targetRefs, viewModel) {
+  if (!state.adminAuthenticated) return;
   if (!viewModel.allCards?.length && !viewModel.cards.length) {
     targetRefs.capacityGrid.innerHTML = createEmptyState(viewModel.emptyMessage || "Choose a CSV to load capacity.");
     return;

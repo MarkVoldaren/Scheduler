@@ -11,7 +11,7 @@
       <form id="login-form" class="login-card">
         <p class="panel-kicker">Scheduler Operations</p>
         <h1>Sign in</h1>
-        <p class="login-copy">Enter the shared app password to access the active schedule and operational settings.</p>
+        <p class="login-copy">Enter the shared app password to access the active schedule.</p>
         <label class="login-field" for="login-password">
           <span>Password</span>
           <input id="login-password" type="password" autocomplete="current-password" required />
@@ -47,7 +47,7 @@
           </button>
           <button id="view-capacity" class="sidebar-link" type="button" data-view="capacity" aria-pressed="false">
             <span class="sidebar-link-icon">C</span>
-            <span class="sidebar-link-label">Capacity</span>
+            <span class="sidebar-link-label">Capacity <span id="capacity-lock-indicator">(Locked)</span></span>
           </button>
           <button id="view-kpi" class="sidebar-link" type="button" data-view="kpi" aria-pressed="false">
             <span class="sidebar-link-icon">K</span>
@@ -115,7 +115,19 @@
                     <span class="panel-note">Set available production hours per day for each department</span>
                   </div>
                 </div>
-                <div id="capacity-grid" class="capacity-grid"></div>
+                <form id="admin-unlock-form" class="admin-unlock-form">
+                  <h3>Admin access required</h3>
+                  <p>Enter the separate admin password to view and change capacity settings.</p>
+                  <label class="login-field" for="admin-password">
+                    <span>Admin password</span>
+                    <input id="admin-password" type="password" autocomplete="current-password" required />
+                  </label>
+                  <p id="admin-unlock-error" class="login-error" role="alert" hidden></p>
+                  <button class="button button-primary" type="submit">Unlock Capacity</button>
+                  <button id="admin-return" class="button button-secondary" type="button">Return to Scheduler</button>
+                </form>
+                <p id="capacity-save-error" class="login-error" role="alert" hidden></p>
+                <div id="capacity-grid" class="capacity-grid" hidden></div>
               </main>
             </section>
 
