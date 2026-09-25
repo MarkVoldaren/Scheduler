@@ -46,32 +46,39 @@
 
   function buildHtml(report) {
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>People - Weekly manning report</title><style>
-      @page { size: letter landscape; margin: .4in; }
-      * { box-sizing: border-box; } body { margin: 0; background: #edf1f5; color: #142a43; font: 9pt 'Segoe UI', Arial, sans-serif; }
+      @page { size: letter portrait; margin: .5in; }
+      * { box-sizing: border-box; } body { margin: 0; background: #edf1f5; color: #142a43; font: 8.4pt 'Segoe UI', Arial, sans-serif; }
       .toolbar { padding: 12px; text-align: center; font: 14px Arial,sans-serif; } .toolbar button { padding: 9px 16px; margin-right: 12px; cursor: pointer; }
-      .frame { width: 10.2in; margin: 12px auto; background: white; overflow: hidden; }
-      .sheet { width: 10.2in; transform-origin: top left; padding: 0; background: white; }
-      header { display: flex; justify-content: space-between; border-top: 6pt solid #142a43; padding: 13pt 0 10pt; font-size: 8pt; font-weight: bold; }
-      h1 { margin: 0 0 5pt; font-size: 24pt; } .subtitle { color: #65758a; margin: 0 0 12pt; font-size: 9pt; }
-      .metrics { display: flex; justify-content: space-between; background: #f3f6fa; padding: 9pt; margin-bottom: 9pt; font-weight: bold; font-size: 10pt; }
-      table { width: 100%; border-collapse: collapse; table-layout: fixed; } col.flow { width: 19%; } col.dept { width: 34%; } col.people { width: 32%; } col.hours { width: 8%; } col.manning { width: 7%; }
-      th { text-align: left; } thead th, tfoot td { background: #142a43; color: white; padding: 8pt 6pt; font-size: 8pt; }
-      tbody td, tbody th { vertical-align: top; padding: 7pt 6pt; border-bottom: .5pt solid #dce3eb; }
-      tbody tr:nth-child(odd) { background: #f3f6fa; } tbody th { border-left: 3pt solid var(--flow); font-size: 9pt; overflow-wrap: anywhere; }
-      .count { display: block; margin-top: 5pt; font-size: 8pt; font-weight: normal; color: #65758a; }
-      .pair { display: flex; justify-content: space-between; align-items: baseline; gap: 8pt; line-height: 1.32; }
-      .pair span { overflow-wrap: anywhere; min-width: 0; } .pair b { flex-shrink: 0; } .zero { color: #65758a; }
-      .number { text-align: right; font-variant-numeric: tabular-nums; } .muted { color: #65758a; } tfoot { display: table-row-group; }
-      .notes { margin: 10pt 0 0; font-size: 7.5pt; line-height: 1.45; color: #65758a; }
-      footer { display: flex; justify-content: space-between; border-top: .5pt solid #dce3eb; margin-top: 10pt; padding-top: 7pt; font-size: 7.5pt; color: #65758a; }
-      @media print { body { background: white; } .toolbar { display: none; } .frame { margin: 0; } * { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
-    </style></head><body><div class="toolbar"><button id="print-report">Print / Save PDF</button><span id="fit-status">Landscape letter - all active people, regardless of roster filters.</span></div><div class="frame"><main class="sheet">
+      .frame { width: 7.5in; margin: 12px auto; background: white; overflow: hidden; }
+      .sheet { width: 7.5in; transform-origin: top left; padding: 0; background: white; }
+      header { display: flex; justify-content: space-between; border-top: 6pt solid #142a43; padding: 10pt 0; font-size: 8pt; font-weight: bold; }
+      h1 { margin: 0 0 5pt; font-size: 24pt; } .subtitle { color: #65758a; margin: 0 0 10pt; font-size: 8pt; }
+      .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10pt; margin-bottom: 8pt; }
+      .metric { background: #f3f6fa; padding: 6pt 10pt; } .metric b { display: block; font-size: 15pt; } .metric span { font-size: 7pt; font-weight: bold; color: #65758a; }
+      .column-headings { display: grid; grid-template-columns: 31% 69%; background: #142a43; color: white; padding: 7pt 6pt; font-size: 7.4pt; font-weight: bold; }
+      .flow-heading, .shop-total { display: flex; align-items: baseline; gap: 8pt; padding: 5pt 6pt; }
+      .flow-heading { background: #f3f6fa; border-left: 3pt solid var(--flow); }
+      .flow-heading h2 { font-size: 10pt; margin: 0; flex: 1; overflow-wrap: anywhere; }
+      .count { font-size: 8pt; color: #65758a; } .flow-totals { margin-left: auto; display: flex; gap: 16pt; white-space: nowrap; }
+      .flow-totals b { min-width: 60pt; text-align: right; }
+      .flow-body { display: grid; grid-template-columns: 29% 1fr 1fr; gap: 16pt; padding: 5pt 6pt 6pt; border-bottom: .5pt solid #dce3eb; }
+      .pair { display: flex; justify-content: space-between; align-items: baseline; gap: 6pt; line-height: 1.35; }
+      .pair span { overflow-wrap: anywhere; min-width: 0; } .pair b { flex-shrink: 0; font-variant-numeric: tabular-nums; } .zero, .muted { color: #65758a; }
+      .shop-total { background: #142a43; color: white; padding: 8pt 6pt; } .shop-total > b { flex: 1; }
+      .notes { margin: 8pt 0 0; font-size: 7pt; line-height: 1.4; color: #65758a; }
+      footer { display: flex; justify-content: space-between; border-top: .5pt solid #dce3eb; margin-top: 8pt; padding-top: 6pt; font-size: 7pt; color: #65758a; }
+      @media print { body { background: white; } .toolbar { display: none; } .frame { margin: 0 auto; } * { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+    </style></head><body><div class="toolbar"><button id="print-report">Print / Save PDF</button><span id="fit-status">Portrait letter - all active people, regardless of roster filters. Turn off browser headers and footers.</span></div><div class="frame"><main class="sheet">
       <header><span>SCHEDULER / PEOPLE</span><span>WEEKLY LABOR ALLOCATION</span></header>
       <h1>Weekly people &amp; manning</h1><p class="subtitle">${esc(report.week)} | Recurring weekly schedule | 40 weekly hours = 1.00 manning</p>
-      <div class="metrics"><span>${report.count} UNIQUE PEOPLE</span><span>${num(report.hours)} WEEKLY HOURS</span><span>${num(report.hours / 40)} TOTAL MANNING</span></div>
-      <table><colgroup><col class="flow"><col class="dept"><col class="people"><col class="hours"><col class="manning"></colgroup><thead><tr><th>FLOW LOCATION</th><th>DEPARTMENT / MANNING</th><th>PEOPLE / MANNING IN FLOW</th><th class="number">HOURS</th><th class="number">MNG.</th></tr></thead><tbody>
-      ${report.groups.map(group => `<tr style="--flow:${group.color}"><th scope="row">${esc(group.name)}<span class="count">${group.people.length} ${group.people.length === 1 ? 'person' : 'people'}</span></th><td>${group.departments.map(d => `<div class="pair${d.hours === 0 ? ' zero' : ''}"><span>${esc(d.name)}${d.unavailable ? '*' : ''}</span><b>${num(d.hours / 40)}</b></div>`).join('') || '<span class="muted">No departments assigned</span>'}</td><td>${group.people.map(p => `<div class="pair"><span>${esc(p.name)}</span><b>${num(p.units / 1000000 / 40)}</b></div>`).join('') || '<span class="muted">No people assigned</span>'}</td><td class="number">${num(group.hours)}</td><td class="number"><b>${num(group.hours / 40)}</b></td></tr>`).join('')}
-      </tbody><tfoot><tr><td><b>SHOP TOTAL</b></td><td colspan="2">${report.count} unique people across all flows</td><td class="number"><b>${num(report.hours)}</b></td><td class="number"><b>${num(report.hours / 40)}</b></td></tr></tfoot></table>
+      <div class="metrics"><div class="metric"><b>${report.count}</b><span>UNIQUE PEOPLE</span></div><div class="metric"><b>${num(report.hours)}</b><span>WEEKLY HOURS</span></div><div class="metric"><b>${num(report.hours / 40)}</b><span>TOTAL MANNING</span></div></div>
+      <div class="column-headings"><span>DEPARTMENT / MANNING</span><span>PEOPLE / MANNING IN FLOW</span></div>
+      ${report.groups.map(group => {
+        const split = Math.ceil(group.people.length / 2);
+        const columns = [group.people.slice(0, split), group.people.slice(split)];
+        return `<section style="--flow:${group.color}"><div class="flow-heading"><h2>${esc(group.name)}</h2><span class="count">${group.people.length} ${group.people.length === 1 ? 'person' : 'people'}</span><div class="flow-totals"><span>${num(group.hours)} hrs</span><b>${num(group.hours / 40)} mng</b></div></div><div class="flow-body"><div>${group.departments.map(d => `<div class="pair${d.hours === 0 ? ' zero' : ''}"><span>${esc(d.name)}${d.unavailable ? '*' : ''}</span><b>${num(d.hours / 40)}</b></div>`).join('') || '<span class="muted">No departments assigned</span>'}</div>${columns.map((people, index) => `<div class="people-column">${people.map(p => `<div class="pair"><span>${esc(p.name)}</span><b>${num(p.units / 1000000 / 40)}</b></div>`).join('') || (index === 0 ? '<span class="muted">No people assigned</span>' : '')}</div>`).join('')}</div></section>`;
+      }).join('')}
+      <div class="shop-total"><b>SHOP TOTAL</b><span>${report.count} unique people</span><div class="flow-totals"><span>${num(report.hours)} hrs</span><b>${num(report.hours / 40)} mng</b></div></div>
       <p class="notes">People may appear in multiple flows; only their allocated hours count in each flow. Shop totals do not double-count labor.<br>Department and person figures are weekly manning. Values are rounded; totals use unrounded allocations. Zero coverage is shown.${report.unavailable ? '<br>*Department unavailable in the current schedule; saved allocations are included.' : ''}</p>
       <footer><span>Generated ${esc(report.generated)} | Active saved roster</span><span>1 / 1</span></footer>
       </main></div></body></html>`;
@@ -80,11 +87,12 @@
   function prepare(doc) {
     const sheet = doc.querySelector('.sheet'), frame = doc.querySelector('.frame');
     sheet.style.transform = 'none';
-    const scale = Math.min(1, (7.7 * 96 - 4) / sheet.scrollHeight, (10.2 * 96 - 2) / sheet.scrollWidth);
+    const scale = Math.min(1, (10 * 96 - 4) / sheet.scrollHeight, (7.5 * 96 - 2) / sheet.scrollWidth);
     sheet.style.transform = `scale(${scale})`;
+    frame.style.width = `${Math.ceil(sheet.scrollWidth * scale)}px`;
     frame.style.height = `${Math.ceil(sheet.scrollHeight * scale)}px`;
     const status = doc.querySelector('#fit-status');
-    if (status) status.textContent = scale < .75 ? `All entries fit on one page at ${Math.round(scale * 100)}% size. A large roster will have small text.` : 'Landscape letter - all active people, regardless of roster filters.';
+    if (status) status.textContent = scale < .75 ? `All entries fit on one page at ${Math.round(scale * 100)}% size. A large roster will have small text.` : 'Portrait letter - all active people, regardless of roster filters. Turn off browser headers and footers.';
     return scale;
   }
   return { createReport, buildHtml, prepare };

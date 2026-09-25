@@ -29,13 +29,26 @@ test('report escapes names, excludes archives, preserves duplicate names and rou
   assert.equal(report.groups[6].people.length,2);
   const html = buildHtml(report); assert.ok(!html.includes('<script>')); assert.ok(html.includes('&lt;script&gt;'));
   assert.ok(html.includes('&lt;Cut&gt;')); assert.match(html,/40 weekly hours = 1.00 manning/);
-  assert.match(html,/@page \{ size: letter landscape/);
+  assert.match(html,/@page \{ size: letter portrait/);
 });
 test('empty report retains all flows and fit scales the complete content to one page', () => {
   const empty = createReport([],[],{},flows); assert.equal(empty.hours,0);
   assert.equal((buildHtml(empty).match(/No people assigned/g)||[]).length,7);
-  const sheet={style:{},scrollHeight:1400,scrollWidth:980},frame={style:{}},status={};
+  const sheet={style:{},scrollHeight:1400,scrollWidth:720},frame={style:{}},status={};
   const scale=prepare({querySelector:selector=>selector==='.sheet'?sheet:selector==='.frame'?frame:status});
-  assert.ok(scale<1); assert.ok(parseInt(frame.style.height)<=740);
+  assert.ok(scale<1); assert.ok(parseInt(frame.style.height)<=960);
   assert.match(status.textContent,/small text/); assert.match(sheet.style.transform,/scale/);
+});
+
+test('portrait report splits odd and even flow rosters into two columns without losing people', () => {
+  for (const count of [1, 5, 6]) {
+    const roster = Array.from({length:count}, (_,i)=>person(i+1,[a('Ink',100)]));
+    const html = buildHtml(createReport(roster,['Ink'],{Ink:'Auxiliary'},flows));
+    const section = html.slice(html.lastIndexOf('<section'), html.lastIndexOf('</section>'));
+    const columns = section.split('<div class="people-column">').slice(1);
+    assert.equal(columns.length,2);
+    assert.equal((columns[0].match(/Person /g)||[]).length,Math.ceil(count/2));
+    assert.equal((columns[1].match(/Person /g)||[]).length,Math.floor(count/2));
+    for (const p of roster) assert.equal(section.split(`<span>${p.name}</span>`).length-1,1);
+  }
 });
