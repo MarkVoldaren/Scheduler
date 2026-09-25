@@ -2033,6 +2033,8 @@ function normalizeShippingRow(row, index) {
   const originalShipDate = parseShippingDate(row["Ship Date"]);
   const accelerationDate = parseShippingDate(row["Acceleration Date"]);
   const shipDate = accelerationDate || originalShipDate;
+  const createdHeader = Object.keys(row).find((header) => normalizeHeaderName(header) === "date created");
+  const dateCreated = parseShippingCreatedDate(row[createdHeader]);
 
   return {
     id: `shipping-${index}`,
@@ -2041,6 +2043,7 @@ function normalizeShippingRow(row, index) {
     originalShipDate,
     accelerationDate,
     isAccelerated: Boolean(accelerationDate),
+    dateCreated,
     poNumber: String(row["P O #"] || "").trim(),
     soTo: String(row["SO / TO"] || "").trim(),
     partNumber: String(row["Part #"] || "").trim(),
@@ -2079,6 +2082,16 @@ function parseShippingDate(value) {
 
   const parsed = new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : stripTime(parsed);
+}
+
+function parseShippingCreatedDate(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm))?$/i);
+  if (!match) return null;
+  const [, month, day, year, hour, minute, second] = match;
+  if (hour !== undefined && (Number(hour) < 1 || Number(hour) > 12 || Number(minute) > 59 || Number(second || 0) > 59)) return null;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  return date.getFullYear() === Number(year) && date.getMonth() === Number(month) - 1 && date.getDate() === Number(day) ? date : null;
 }
 
 function normalizeDateInputValue(value) {
@@ -2251,6 +2264,7 @@ function getPickListViewModel(targetState) {
 
   const enrichedRows = targetState.shippingRows
     .map((row) => enrichShippingRow(row, targetState.jobs))
+    .map((row) => ({ ...row, isEnteredToday: Boolean(row.dateCreated && row.dateCreated.getTime() === startOfToday().getTime()) }))
     .filter((row) =>
       matchesPickListFilters(row, selectedCustomer, selectedCustomerDetail, commitmentFilter, acceleratedOnly, dateFrom, dateTo, search)
     )
@@ -4110,12 +4124,12 @@ function createPickListRow(row) {
     ? `<span class="pick-list-os-tag" title="${escapeHtml(row.outsourcedSo)}">OS</span>`
     : "";
   return `
-    <tr class="pick-list-row pick-list-commit-${slugify(row.commitmentStatus)}${row.isAccelerated ? " pick-list-row-accelerated" : ""}">
-      <td class="pick-list-date-cell">${createEffectiveDateMarkup(
+    <tr class="pick-list-row pick-list-commit-${slugify(row.commitmentStatus)}${row.isAccelerated ? " pick-list-row-accelerated" : ""}${row.isEnteredToday ? " pick-list-row-entered-today" : ""}">
+      <td class="pick-list-date-cell"><span class="pick-list-date-tags">${createEffectiveDateMarkup(
         row.shipDateLabel,
         row.isAccelerated,
         row.originalShipDate ? formatDate(row.originalShipDate) : "Unknown"
-      )}</td>
+      )}${row.isEnteredToday ? '<span class="pick-list-entered-today-badge">Entered Today</span>' : ""}</span></td>
       <td><span class="pick-list-part"><strong>${escapeHtml(row.partNumber)}</strong>${outsourcedTag}</span></td>
       <td>${escapeHtml(row.customer)}</td>
       <td>${escapeHtml(row.soTo)}</td>
@@ -4743,6 +4757,9 @@ function buildPickListPrintHtml(viewModel, groups, groupKey, printMode = "curren
     .wo { font-weight: 700; }
     tr.accelerated td { background: #fff7d6; border-color: #d97706; }
     .accelerated-label { display: block; width: fit-content; margin-top: 2px; border: 1px solid #b45309; border-radius: 999px; padding: 1px 4px; color: #92400e; font-size: 6.5px; line-height: 1.1; text-transform: uppercase; }
+    tr.entered-today td { background: #e0f2fe; border-color: #7dd3fc; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    tr.entered-today td:first-child { box-shadow: inset 3px 0 0 #0284c7; }
+    .entered-today-label { display: block; width: fit-content; margin-top: 2px; border: 1px solid #0284c7; border-radius: 999px; padding: 1px 4px; background: #bae6fd; color: #075985; font-size: 6.5px; line-height: 1.1; text-transform: uppercase; }
     .original-date { display: block; margin-top: 2px; color: #6b7280; font-size: 6.5px; white-space: nowrap; }
     .no-print-rows { padding: 6px; border: 1px solid #cbd5e1; color: #6b7280; }
   </style>
@@ -4819,12 +4836,12 @@ function createPickListPrintRow(row) {
   const effectiveDate = formatPrintShipDate(row.shipDate) || row.shipDateLabel || "";
   const originalDate = formatPrintShipDate(row.originalShipDate) || "Unknown";
   return `
-    <tr class="${row.isAccelerated ? "accelerated" : ""}">
+    <tr class="${row.isAccelerated ? "accelerated" : ""}${row.isEnteredToday ? " entered-today" : ""}">
       <td>${escapeHtml(effectiveDate)}${
         row.isAccelerated
           ? `<strong class="accelerated-label">Accelerated</strong><small class="original-date">Original: ${escapeHtml(originalDate)}</small>`
           : ""
-      }</td>
+      }${row.isEnteredToday ? '<strong class="entered-today-label">Entered Today</strong>' : ""}</td>
       <td class="part">${escapeHtml(row.partNumber || "")}</td>
       <td class="num">${escapeHtml(formatPrintNumber(row.qtyNeeded))}</td>
       <td class="num">${escapeHtml(formatPrintNumber(row.qtyCommitted))}</td>
