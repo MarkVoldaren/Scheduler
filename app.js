@@ -122,6 +122,13 @@ const peopleUI = globalThis.createPeopleUI({
   isAdmin: () => state.adminAuthenticated,
   isActive: () => state.currentView === "people" && document.body.dataset.auth === "unlocked",
   lock: () => setAdminAuthenticated(false),
+  buildReport: async () => {
+    const [roster, configuration] = await Promise.all([fetchJson("/api/people"), fetchJson("/api/app-state")]);
+    const names = [...new Set([...roster.departments, ...roster.people.filter(person => !person.archived).flatMap(person => person.allocations.map(a => a.department))])];
+    const flowState = { flowLocations: configuration.settings.flowLocations || {} };
+    const mapping = Object.fromEntries(names.map(name => [name, getDepartmentFlowLocation(flowState, name)]));
+    return globalThis.PeoplePrint.buildHtml(globalThis.PeoplePrint.createReport(roster.people, roster.departments, mapping, FLOW_LOCATION_OPTIONS));
+  },
   unlock: async (password) => {
     const generation = state.authGeneration;
     await fetchJson("/api/admin/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });

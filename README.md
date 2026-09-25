@@ -177,3 +177,11 @@ Department choices follow the scheduler's open work centers. Saved assignments s
 Records are stored in the existing SQLite database. Startup creates the People table additively; no existing settings are migrated or overwritten. Concurrent edits use record revisions: stale saves fail and offer a refresh rather than overwrite another user's changes. Archives can be restored; there is no permanent delete or date-specific history.
 
 API: authenticated `GET /api/people`; admin-only `POST /api/people`, `PUT /api/people/:id`, and `PUT /api/people/:id/archive`. Write payloads contain `name`, `hours` keyed by `mon`–`sun`, and `allocations` with `department`/`percent`; edits require `revision`. Archive/restore accepts `revision` and `archived`. Lists return `people` and `departments`.
+
+### Weekly People PDF report
+
+On People, select **Print / PDF Report**, then **Print / Save PDF** in the report window and choose your browser's Save as PDF destination. Use landscape Letter paper, default scale, and turn off the browser's extra headers/footers. The report fetches fresh saved roster data and flow assignments, includes all active people regardless of list filters, and uses **40 allocated weekly hours = 1.0 manning**. Save or cancel an open person editor before reporting.
+
+The single-page layout shows all seven flows, department manning (including zero coverage), each person's manning within that flow, flow hours/manning, and unique shop totals. Multiple departments in the same flow are combined for each person. Archived people are excluded. Saved departments missing from the current CSV remain included and are marked with an asterisk; flow mappings use the same configured/default rules as the KPI Board. The displayed week is the current Monday–Sunday in America/Chicago and represents the recurring schedule, not attendance or historical hours.
+
+The report automatically scales all content to one landscape page without omitting names. Large rosters can produce small text; the report preview shows a reduced-size notice when scaling below 75%. No Capacity settings or KPI calculations are modified.

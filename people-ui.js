@@ -5,12 +5,15 @@
   const number = value => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
   const allocated = value => Number(value || 0).toFixed(2);
   const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  globalThis.createPeopleUI = function ({ root, request, isAdmin, unlock, lock, isActive }) {
+  globalThis.createPeopleUI = function ({ root, request, isAdmin, unlock, lock, isActive, buildReport }) {
+    let pendingReport = null;
     let people = [], departments = [], draft = null, baseline = '', retained = [];
     let search = '', department = '', archived = false, error = '', notice = '', busy = false, generation = 0, loaded = false, unlockOpen = false;
     const dirty = () => draft && JSON.stringify(draft) !== baseline;
     const mayLeave = () => !busy && (!dirty() || window.confirm('Discard unsaved changes to this person?'));
     function clear() {
+      if (pendingReport && !pendingReport.closed) pendingReport.close();
+      pendingReport = null;
       generation++; people = []; departments = []; draft = null; baseline = ''; retained = [];
       search = ''; department = ''; archived = false; error = ''; notice = ''; busy = false; loaded = false; unlockOpen = false;
       root.replaceChildren();
@@ -60,7 +63,7 @@
     }
     function render() {
       const filterDepartments = [...new Set([...departments, ...people.flatMap(person => person.allocations.map(item => item.department))])].sort((a, b) => a.localeCompare(b));
-      root.innerHTML = `<div class="people-heading"><div><p class="panel-kicker">Operations</p><h1>People</h1><p>Weekly scheduled hours and department assignments</p></div>${isAdmin() ? `<button class="button button-primary" data-action="add" ${busy || draft ? 'disabled' : ''}>Add Person</button>` : '<button class="button button-secondary" data-action="unlock">Unlock editing</button>'}</div>
+      root.innerHTML = `<div class="people-heading"><div><p class="panel-kicker">Operations</p><h1>People</h1><p>Weekly scheduled hours and department assignments</p></div><button class="button button-secondary" data-action="report" ${busy || draft || !loaded ? 'disabled' : ''} title="All active people; 40 weekly hours = 1.0 manning">Print / PDF Report</button>${isAdmin() ? `<button class="button button-primary" data-action="add" ${busy || draft ? 'disabled' : ''}>Add Person</button>` : '<button class="button button-secondary" data-action="unlock">Unlock editing</button>'}</div>
         ${unlockOpen && !isAdmin() ? `<form id="people-unlock"><label>Admin password<input name="password" type="password" autocomplete="current-password" required></label><button class="button button-primary" ${busy ? 'disabled' : ''}>Unlock editing</button></form>` : ''}
         ${status()}${loaded && !departments.length ? '<p class="people-notice">Upload a Work Center CSV with open departments before assigning a new department. Existing assignments can be retained.</p>' : ''}
         ${draft ? form() : `<div class="people-filters"><label>Search people<input data-filter="search" type="search" value="${esc(search)}" placeholder="Search by name"></label><label>Department<select data-filter="department"><option value="">All departments</option>${filterDepartments.map(name => `<option ${name === department ? 'selected' : ''} value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label><label>Roster<select data-filter="archived"><option value="active" ${!archived ? 'selected' : ''}>Active</option><option value="archived" ${archived ? 'selected' : ''}>Archived</option></select></label><button class="button button-secondary" data-action="refresh" ${busy ? 'disabled' : ''}>Refresh</button></div><div id="people-list">${list()}</div>`}`;
@@ -121,6 +124,30 @@
       const button = event.target.closest('button');
       if (!button || busy) return;
       const action = button.dataset.action;
+      if (action === 'report') {
+        const popup = window.open('', '_blank');
+        if (!popup) { showError(new Error('Allow popups to open the People report.')); return; }
+        pendingReport = popup;
+        popup.document.write('<!doctype html><title>People report</title><p>Preparing weekly report...</p>'); popup.document.close();
+        const token = ++generation; busy = true; error = ''; render();
+        try {
+          const html = await buildReport();
+          if (token !== generation || popup.closed) return;
+          popup.document.open(); popup.document.write(html); popup.document.close();
+          await popup.document.fonts.ready;
+          if (token !== generation || popup.closed) return;
+          const prepare = () => globalThis.PeoplePrint.prepare(popup.document);
+          prepare();
+          popup.addEventListener('beforeprint', prepare);
+          popup.document.querySelector('#print-report').addEventListener('click', () => { prepare(); popup.print(); });
+          pendingReport = null;
+          notice = 'Report opened. Choose Print / Save PDF in the report window.';
+        } catch (failure) {
+          if (!popup.closed) popup.close();
+          if (token === generation) error = failure.message || 'Unable to create report.';
+        } finally { if (token === generation) { busy = false; pendingReport = null; render(); } }
+        return;
+      }
       if (action === 'unlock') { unlockOpen = !unlockOpen; render(); root.querySelector('#people-unlock input')?.focus(); return; }
       if (action === 'refresh') { await refresh(); return; }
       if (action === 'cancel') { if (mayLeave()) { draft = null; error = ''; render(); } return; }

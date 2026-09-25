@@ -261,6 +261,7 @@ app.put("/api/settings", (req, res) => {
 const publicFiles = new Set(["/", "/index.html", "/app.js", "/styles.css", "/scheduler-core.js", "/projects-ui.js", "/projects-print.js", "/main.js", "/csv.js", "/domain.js", "/render.js", "/selectors.js", "/state.js"]);
 publicFiles.add("/people-ui.js");
 publicFiles.add("/people-domain.js");
+publicFiles.add("/people-print.js");
 const publicAssets = express.static(__dirname, {
   extensions: ["html"],
   etag: false,

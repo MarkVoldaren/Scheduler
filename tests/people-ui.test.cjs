@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const domain = require('../people-domain');
 const source = fs.readFileSync(path.join(__dirname, '../people-ui.js'), 'utf8');
-function setup(request) {
+function setup(request, extras = {}, open = () => null) {
   const events = {}, selectors = new Map();
   const root = {
     innerHTML: '', addEventListener(name, listener) { events[name] = listener; },
@@ -14,9 +14,9 @@ function setup(request) {
     querySelectorAll() { return []; },
   };
   let allowLeave = false;
-  const context = vm.createContext({ PeopleDomain: domain, window: { confirm: () => allowLeave, addEventListener() {} } });
+  const context = vm.createContext({ PeopleDomain: domain, PeoplePrint: { prepare() {} }, window: { open, confirm: () => allowLeave, addEventListener() {} } });
   vm.runInContext(source, context);
-  const ui = context.createPeopleUI({ root, request, isAdmin: () => true, isActive: () => true, lock() {}, unlock: async () => {} });
+  const ui = context.createPeopleUI({ root, request, isAdmin: () => true, isActive: () => true, lock() {}, unlock: async () => {}, ...extras });
   const click = dataset => events.click({ target: { closest: () => ({ dataset }) } });
   return { ui, root, events, click, allowLeave: () => { allowLeave = true; } };
 }
@@ -66,4 +66,26 @@ test('People drops late successful saves after logout', async () => {
   const pending = app.events.submit({preventDefault(){},target:{id:'people-form'}});
   app.ui.clear(); resolve(person); await pending;
   assert.equal(app.root.innerHTML, '');
+});
+
+test('report is available to viewers and handles popup blocking', async () => {
+  const app = setup(async () => data(), { isAdmin: () => false });
+  await app.ui.refresh();
+  assert.match(app.root.innerHTML, /Print \/ PDF Report/);
+  await app.click({action:'report'});
+  assert.match(app.root.innerHTML, /Allow popups/);
+});
+
+test('report reads fresh data, binds printing, and closes pending windows on logout', async () => {
+  let resolve, printed = false, bound;
+  const popup = { closed:false, close(){this.closed=true;}, print(){printed=true;}, addEventListener(){}, document:{
+    html:'', write(html){this.html=html;}, open(){}, close(){}, fonts:{ready:Promise.resolve()}, querySelector(){return {addEventListener(name,handler){bound=handler;}};},
+  } };
+  const app = setup(async () => data(), {buildReport:()=>new Promise(done=>{resolve=done;})}, () => popup);
+  await app.ui.refresh();
+  const pending = app.click({action:'report'}); resolve('<h1>Fresh report</h1>'); await pending;
+  assert.match(popup.document.html,/Fresh report/); bound(); assert.equal(printed,true);
+  const second = app.click({action:'report'}); app.ui.clear(); resolve('Stale private report'); await second;
+  assert.equal(popup.closed,true); assert.ok(!popup.document.html.includes('Stale private report'));
+  assert.equal(app.root.innerHTML,'');
 });
