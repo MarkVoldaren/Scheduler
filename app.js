@@ -2514,6 +2514,9 @@ function enrichShippingRow(row, jobs) {
   const commitmentStatus = getCommitStatus(row);
   const match = matchShippingRowToSchedule(row, jobs);
   const currentOperation = match.job ? getCurrentOperationForMatchedJob(match.job) : null;
+  const nextOperation = match.job && currentOperation
+    ? match.job.operations.find((operation) => operation.phase !== "complete" && operation.sequence > currentOperation.sequence) || null
+    : null;
   return {
     ...row,
     commitmentStatus,
@@ -2524,6 +2527,8 @@ function enrichShippingRow(row, jobs) {
     possibleMatchCount: match.possibleMatchCount || 0,
     currentDepartment: currentOperation?.workCenter || "",
     currentOperation: currentOperation?.operationName || "",
+    nextDepartment: nextOperation?.workCenter || "",
+    nextOperation: nextOperation?.operationName || "",
     hoursRemaining: match.job?.totalHoursRemaining || 0,
   };
 }
@@ -4113,8 +4118,8 @@ function createPickListSection(group) {
                     <th>Cell</th>
                     <th>Acc Report</th>
                     <th>WO Match</th>
-                    <th>Current Dept</th>
-                    <th>Current Op</th>
+                    <th>Current OP</th>
+                    <th>Next OP</th>
                   </tr>
                 </thead>
                 <tbody>${group.rows.map(createPickListRow).join("")}</tbody>
@@ -4150,8 +4155,8 @@ function createPickListRow(row) {
       <td>${escapeHtml(row.cell)}</td>
       <td>${escapeHtml(row.accReport)}</td>
       <td>${createPickListMatchCell(row)}</td>
-      <td>${escapeHtml(row.currentDepartment || "-")}</td>
-      <td>${escapeHtml(row.currentOperation || "-")}</td>
+      <td>${escapeHtml(formatPickListOperation(row.currentDepartment, row.currentOperation))}</td>
+      <td>${escapeHtml(formatPickListOperation(row.nextDepartment, row.nextOperation))}</td>
     </tr>
   `;
 }
@@ -4171,6 +4176,10 @@ function createEffectiveDateMarkup(dateLabel, isAccelerated, originalDateLabel) 
     </span>
     <small class="pick-list-original-date">Original: ${escapeHtml(originalDateLabel || "Unknown")}</small>
   `;
+}
+
+function formatPickListOperation(department, operation) {
+  return [department, operation].filter(Boolean).join(" --- ") || "-";
 }
 
 function createPickListMatchCell(row) {
@@ -4821,8 +4830,8 @@ function createPickListPrintSection(group) {
                   <th>SO/TO</th>
                   <th>Customer</th>
                   <th>WO</th>
-                  <th>Dept</th>
-                  <th>Op</th>
+                  <th>Current OP</th>
+                  <th>Next OP</th>
                   <th>Hrs</th>
                 </tr>
               </thead>
@@ -4835,7 +4844,7 @@ function createPickListPrintSection(group) {
 }
 
 function getPickListPrintColgroup() {
-  const widths = [7, 18, 5, 5, 5, 6, 6, 8, 10, 8, 7, 12, 3];
+  const widths = [7, 14, 4, 4, 4, 6, 5, 8, 9, 8, 14, 14, 3];
   return `<colgroup>${widths.map((width) => `<col style="width:${width}%">`).join("")}</colgroup>`;
 }
 
@@ -4858,8 +4867,8 @@ function createPickListPrintRow(row) {
       <td>${escapeHtml(row.soTo || "")}</td>
       <td class="customer">${escapeHtml(row.customer || "")}</td>
       <td class="wo">${escapeHtml(getPrintWoLabel(row))}</td>
-      <td class="dept">${escapeHtml(row.currentDepartment || "")}</td>
-      <td class="operation">${escapeHtml(row.currentOperation || "")}</td>
+      <td class="operation">${escapeHtml(formatPickListOperation(row.currentDepartment, row.currentOperation))}</td>
+      <td class="operation">${escapeHtml(formatPickListOperation(row.nextDepartment, row.nextOperation))}</td>
       <td class="hours">${row.hoursRemaining ? escapeHtml(formatHours(row.hoursRemaining)) : ""}</td>
     </tr>
   `;

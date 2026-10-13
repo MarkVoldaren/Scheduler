@@ -26,6 +26,41 @@ function rows(model) {
   return Object.values(model.groupedRows).flatMap(group => group.rows);
 }
 
+test('pick list uses the matched WO routing and skips concurrent and completed steps', () => {
+  const { ctx } = context();
+  const current = { sequence: 10, phase: 'current', workCenter: 'Digital Cut', operationName: 'Plotcut' };
+  const job = {
+    workOrders: ['123'], part: 'PART-1', customer: 'Customer', totalHoursRemaining: 5,
+    currentOperation: current, operations: [current,
+      { sequence: 10, phase: 'current', workCenter: 'Other', operationName: 'Concurrent' },
+      { sequence: 20, phase: 'complete', workCenter: 'Other', operationName: 'Done' },
+      { sequence: 30, phase: 'future', workCenter: 'Digital Cut', operationName: 'Trim <edge>' }],
+  };
+  for (const associated of ['', '123']) {
+    const shipping = row(ctx, '');
+    shipping.normalizedAssocWo = associated;
+    const enriched = ctx.enrichShippingRow(shipping, [job]);
+    assert.equal(enriched.matchType, associated ? 'linked' : 'suggested');
+    assert.equal(enriched.nextDepartment, 'Digital Cut');
+    assert.equal(enriched.nextOperation, 'Trim <edge>');
+    for (const html of [ctx.createPickListRow(enriched), ctx.createPickListPrintRow(enriched)]) {
+      assert.match(html, /Digital Cut --- Plotcut/);
+      assert.match(html, /Digital Cut --- Trim &lt;edge&gt;/);
+      assert.doesNotMatch(html, /Concurrent|Done/);
+    }
+  }
+  job.operations = [current];
+  assert.equal(ctx.enrichShippingRow(row(ctx, ''), [job]).nextOperation, '');
+  assert.equal(ctx.enrichShippingRow(row(ctx, ''), []).nextDepartment, '');
+  assert.equal(ctx.formatPickListOperation('', ''), '-');
+  assert.equal(ctx.formatPickListOperation('Cut', ''), 'Cut');
+  assert.equal(ctx.formatPickListOperation('', 'Trim'), 'Trim');
+  const populated = ctx.createPickListPrintSection({ group: 'Today', rows: [ctx.enrichShippingRow(row(ctx, ''), [job])] });
+  assert.match(populated, /<th>Current OP<\/th>\s*<th>Next OP<\/th>/);
+  assert.equal((populated.match(/<col style=/g) || []).length, 13);
+  assert.equal((ctx.createPickListPrintRow(ctx.enrichShippingRow(row(ctx, ''), [job])).match(/<td[ >]/g) || []).length, 13);
+});
+
 test('creation timestamps use their calendar date and tolerate header case', () => {
   const { ctx } = context();
   for (const header of ['Date Created', 'DATE CREATED', ' date   created ']) {
