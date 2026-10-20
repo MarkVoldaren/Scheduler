@@ -159,6 +159,8 @@ async function init() {
   applyInitialTheme();
   applyInitialSidebar();
   bindEvents();
+  applyMobilePickingRoute();
+  window.addEventListener("hashchange", applyMobilePickingRoute);
   window.addEventListener("focus", () => {
     if (state.authenticated && state.currentView === "pick-list") refreshPicking(true);
   });
@@ -177,6 +179,7 @@ function createInitialState() {
     jobs: [],
     shippingRows: [],
     pickProgress: {},
+    mobilePicking: { active: false, from: "", to: "", shelf: null },
     workCenters: [],
     sourceName: DEFAULT_SOURCE_NAME,
     shippingSourceName: "",
@@ -283,6 +286,11 @@ function createRefs() {
 }
 
 function bindEvents() {
+  document.querySelector("#mobile-picking-open").addEventListener("click", () => {
+    state.mobilePicking.from = state.filters.pickListDateFrom || "";
+    state.mobilePicking.to = state.filters.pickListDateTo || "";
+    updateMobilePickingHash();
+  });
   refs.csvInput.addEventListener("change", async (event) => {
     const [file] = event.target.files || [];
     if (!file) {
@@ -550,6 +558,19 @@ function bindEvents() {
     if (!(target instanceof HTMLSelectElement) && !(target instanceof HTMLInputElement)) {
       return;
     }
+    if (target.dataset.mobileDate) {
+      state.mobilePicking[target.dataset.mobileDate] = target.value;
+      updateMobilePickingHash(true);
+      renderPickListSurface();
+      refs.pickListRoot.querySelector(`[data-mobile-date="${target.dataset.mobileDate}"]`)?.focus();
+      return;
+    }
+    if (target.dataset.mobileShelf !== undefined) {
+      state.mobilePicking.shelf = target.value;
+      renderPickListSurface();
+      refs.pickListRoot.querySelector("[data-mobile-shelf]")?.focus();
+      return;
+    }
 
     if (target.dataset.pickListCustomer !== undefined) {
       setSelectedPickListCustomer(state, target.value);
@@ -590,6 +611,19 @@ function bindEvents() {
   refs.pickListRoot.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element)) {
+      return;
+    }
+    const mobileAction = target.closest("[data-mobile-action]");
+    if (mobileAction) {
+      const action = mobileAction.dataset.mobileAction;
+      if (action === "back") window.location.hash = "pick-list";
+      else if (action === "refresh") refreshPicking(true);
+      else {
+        const model = getMobilePickingModel(state);
+        state.mobilePicking.shelf = model.shelves[model.index + (action === "next" ? 1 : -1)] ?? model.shelf;
+        renderPickListSurface();
+        refs.pickListRoot.querySelector(`[data-mobile-action="${action}"]`)?.focus();
+      }
       return;
     }
 
@@ -1060,6 +1094,10 @@ function renderDepartmentViewerSurface() {
 
 function renderPickListSurface() {
   renderSharedChrome(refs, state);
+  if (state.mobilePicking.active) {
+    renderMobilePicking();
+    return;
+  }
   renderPickList(refs, getPickListViewModel(state));
 }
 
@@ -3733,6 +3771,7 @@ function uniqueValues(values) {
 }
 
 function renderSharedChrome(targetRefs, targetState) {
+  document.body.dataset.mobilePicking = String(Boolean(targetState.mobilePicking?.active && targetState.currentView === "pick-list"));
   targetRefs.sourcePill.textContent = targetState.sourceName;
   renderCsvUploadMetadata(targetRefs.workCenterUploadedAt, targetState.activeCsvMeta.workCenter);
   renderCsvUploadMetadata(targetRefs.pickListUploadedAt, targetState.activeCsvMeta.pickList);
@@ -4153,6 +4192,91 @@ function createPickListSection(group) {
   `;
 }
 
+function updateMobilePickingHash(replace = false) {
+  const params = new URLSearchParams({ from: state.mobilePicking.from, to: state.mobilePicking.to });
+  const hash = `#mobile-picking?${params}`;
+  if (replace) window.history.replaceState(null, "", hash);
+  else window.location.hash = hash;
+}
+
+function applyMobilePickingRoute() {
+  const [route, query = ""] = window.location.hash.slice(1).split("?");
+  if (route === "mobile-picking") {
+    const params = new URLSearchParams(query);
+    state.mobilePicking.active = true;
+    state.mobilePicking.from = normalizeDateInputValue(params.get("from") || "");
+    state.mobilePicking.to = normalizeDateInputValue(params.get("to") || "");
+    setCurrentView(state, "pick-list");
+  } else if (state.mobilePicking.active) {
+    state.mobilePicking.active = false;
+    setCurrentView(state, "pick-list");
+  }
+  renderActiveSurface();
+  if (state.authenticated && state.currentView === "pick-list") refreshPicking(true);
+}
+
+function getMobilePickingModel(targetState) {
+  const mobile = targetState.mobilePicking;
+  const invalidRange = Boolean(mobile.from && mobile.to && mobile.from > mobile.to);
+  const rows = invalidRange ? [] : targetState.shippingRows
+    .filter(row => matchesPickListFilters(row, "ALL", "", "all", false, mobile.from, mobile.to, ""))
+    .map(row => ({ ...row, shelf: String(row.shelf || "").trim(), pulledQuantity: targetState.pickProgress?.[row.pickKey]?.quantity || 0 }))
+    .sort((a, b) => (a.shipDate?.getTime() ?? Infinity) - (b.shipDate?.getTime() ?? Infinity)
+      || a.partNumber.localeCompare(b.partNumber, undefined, { numeric: true })
+      || a.soTo.localeCompare(b.soTo, undefined, { numeric: true }));
+  const shelves = [...new Set(rows.map(row => row.shelf))].sort((a, b) => {
+    if (!a) return 1;
+    if (!b) return -1;
+    return a.localeCompare(b, undefined, { numeric: true });
+  });
+  const shelf = shelves.includes(mobile.shelf) ? mobile.shelf : (shelves[0] ?? null);
+  return { shelves, shelf, index: shelves.indexOf(shelf), rows: rows.filter(row => row.shelf === shelf), invalidRange };
+}
+
+function renderMobilePicking() {
+  const model = getMobilePickingModel(state);
+  state.mobilePicking.shelf = model.shelf;
+  const empty = model.invalidRange ? "From date must be on or before To date."
+    : !state.activeCsvMeta.pickList ? "No Pick List uploaded. Return to Pick List to upload a CSV."
+    : "No items in this date range.";
+  refs.pickListRoot.innerHTML = `
+    <div class="mobile-picking">
+      <header class="mobile-picking-header">
+        <button class="button button-secondary" type="button" data-mobile-action="back">Back to Pick List</button>
+        <button class="button button-secondary" type="button" data-mobile-action="refresh">Refresh</button>
+        <h1>Mobile Picking</h1>
+      </header>
+      <div class="mobile-picking-dates">
+        <label>From<input type="date" data-mobile-date="from" value="${escapeHtml(state.mobilePicking.from)}"></label>
+        <label>To<input type="date" data-mobile-date="to" value="${escapeHtml(state.mobilePicking.to)}"></label>
+      </div>
+      <section class="mobile-shelf-navigation" aria-label="Shelf navigation">
+        <h2>${model.shelf === null ? "No shelves" : `Shelf: ${escapeHtml(model.shelf || "No Shelf")}`}</h2>
+        <label>Shelf<select data-mobile-shelf ${!model.shelves.length ? "disabled" : ""}>
+          ${model.shelves.map(shelf => `<option value="${escapeHtml(shelf)}"${shelf === model.shelf ? " selected" : ""}>${escapeHtml(shelf || "No Shelf")}</option>`).join("")}
+        </select></label>
+        <div class="mobile-shelf-steps">
+          <button class="button button-secondary" type="button" data-mobile-action="previous" ${model.index <= 0 ? "disabled" : ""}>Previous</button>
+          <span role="status">${model.index + 1} of ${model.shelves.length}</span>
+          <button class="button button-secondary" type="button" data-mobile-action="next" ${model.index < 0 || model.index >= model.shelves.length - 1 ? "disabled" : ""}>Next</button>
+        </div>
+      </section>
+      <div class="mobile-picking-items">
+        ${model.rows.length ? model.rows.map(row => `<article class="mobile-pick-item" aria-label="${escapeHtml(row.partNumber)}">
+          <dl>
+            <div><dt>Date</dt><dd>${escapeHtml(row.shipDateLabel)}</dd></div>
+            <div class="mobile-pick-part"><dt>Part Number</dt><dd>${escapeHtml(row.partNumber)}</dd></div>
+            <div class="mobile-pick-customer"><dt>Customer Group</dt><dd>${escapeHtml(getCustomerGroupName(row.customer))}</dd></div>
+            <div><dt>SO / TO</dt><dd>${escapeHtml(row.soTo)}</dd></div>
+            <div><dt>Needed</dt><dd>${escapeHtml(String(row.qtyNeeded))}</dd></div>
+            <div><dt>Committed</dt><dd>${escapeHtml(String(row.qtyCommitted))}</dd></div>
+            <div><dt>Picked</dt><dd>${createPickedCell(row)}</dd></div>
+          </dl>
+        </article>`).join("") : `<p role="status">${empty}</p>`}
+      </div>
+    </div>`;
+}
+
 function createPickedCell(row) {
   if (row.pickAmbiguous) return '<span title="Identical matching fields occur more than once. Picking cannot be assigned safely.">Duplicate key</span>';
   const progress = row.pulledQuantity > 0 ? { quantity: row.pulledQuantity } : null;
@@ -4166,10 +4290,15 @@ async function refreshPicking(reloadCsv = false) {
   const generation = state.authGeneration;
   state.pickingRefreshing = true;
   try {
-    if (reloadCsv && state.activeCsvMeta.pickList) {
-      const text = await fetchText("/api/csv/pick-list");
+    if (reloadCsv) {
+      const appState = await fetchJson("/api/app-state");
       if (generation !== state.authGeneration) return;
-      hydrateShippingCsv(text, state.shippingSourceName);
+      state.activeCsvMeta.pickList = appState.csvs?.pickList || null;
+      if (state.activeCsvMeta.pickList) {
+        const text = await fetchText("/api/csv/pick-list");
+        if (generation !== state.authGeneration) return;
+        hydrateShippingCsv(text, state.activeCsvMeta.pickList.originalName);
+      }
     }
     const progress = await fetchJson("/api/pick-progress");
     if (generation !== state.authGeneration) return;
@@ -4200,6 +4329,7 @@ async function editPickedQuantity(key) {
     if (generation !== state.authGeneration) return;
     state.pickProgress = Object.fromEntries(rows.map(row => [row.key, row]));
     renderPickListSurface();
+    [...refs.pickListRoot.querySelectorAll("[data-picked-key]")].find(element => element.dataset.pickedKey === key)?.focus();
   } catch (error) {
     alert(error.message || "Unable to save quantity pulled.");
     await refreshPicking(true);
@@ -4629,7 +4759,8 @@ function renderError(targetRefs, message) {
   targetRefs.sequencersGrid.innerHTML = createEmptyCard("Scheduler", "Master list", message);
   targetRefs.capacityGrid.innerHTML = createEmptyState(message);
   targetRefs.kpiBoardRoot.innerHTML = createEmptyState("Load a schedule CSV to view department KPI data.");
-  renderPickList(targetRefs, getPickListViewModel(state));
+  if (state.mobilePicking.active) renderMobilePicking();
+  else renderPickList(targetRefs, getPickListViewModel(state));
   targetRefs.departmentViewer.innerHTML = createEmptyState(message);
 }
 

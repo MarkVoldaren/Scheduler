@@ -4208,3 +4208,32 @@ body[data-modal-open="true"] {
   border: 0;
   padding: 6px;
 }
+body[data-mobile-picking="true"] .sidebar,
+body[data-mobile-picking="true"] .sidebar-scrim,
+body[data-mobile-picking="true"] .mobile-sidebar-toggle,
+body[data-mobile-picking="true"] #page-pick-list > main > .panel-head {
+  display: none;
+}
+body[data-mobile-picking="true"] .dashboard-shell { grid-template-columns: minmax(0, 1fr); }
+body[data-mobile-picking="true"] .app-shell { padding: 12px; min-width: 0; }
+body[data-mobile-picking="true"] #page-pick-list > main { padding: 0; background: transparent; border: 0; box-shadow: none; }
+.mobile-picking { width: 100%; max-width: 760px; margin: 0 auto; overflow-wrap: anywhere; }
+.mobile-picking-header { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
+.mobile-picking-header h1 { flex-basis: 100%; font-size: 1.4rem; margin: 8px 0; }
+.mobile-picking button, .mobile-picking select, .mobile-picking input { min-height: 44px; }
+.mobile-picking button, .mobile-picking input, .mobile-picking select { font-size: 16px; }
+.mobile-picking-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.mobile-picking label { display: grid; gap: 5px; min-width: 0; }
+.mobile-picking input[type="date"], .mobile-picking select { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px; }
+.mobile-shelf-navigation { margin: 18px 0; }
+.mobile-shelf-navigation h2 { font-size: 1.3rem; }
+.mobile-shelf-steps { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; }
+.mobile-picking-items { display: grid; gap: 12px; }
+.mobile-pick-item { border: 1px solid var(--panel-border-strong); border-radius: 12px; padding: 14px; background: var(--surface); }
+.mobile-pick-item dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.mobile-pick-item dt { font-size: .75rem; opacity: .75; margin-bottom: 4px; }
+.mobile-pick-item dd { margin: 0; font-size: 1rem; }
+.mobile-pick-part { grid-column: span 2; font-weight: 700; }
+.mobile-pick-customer { grid-column: span 2; }
+.mobile-pick-item input[type="checkbox"] { width: 44px; height: 44px; margin: 0; cursor: pointer; }
+.mobile-pick-item .picked-quantity { min-width: 44px; }

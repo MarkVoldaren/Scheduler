@@ -29,6 +29,8 @@ The server stores runtime data in `data/` by default:
 
 New CSV uploads overwrite the active CSV file. The app does not retain upload history.
 
+Choose **Mobile Picking** on the Pick List for a phone-friendly view of one shelf at a time. It carries over the desktop date range, includes all customer groups, and uses effective ship dates (including acceleration). Change dates, jump to a shelf, or use Previous/Next; blank shelves appear as **No Shelf** at the end. Click the Picked checkbox to enter a quantity, click the saved quantity to edit, and enter zero to clear. Mobile and desktop share the same picking progress. Use Refresh for the latest upload; returning to the browser also refreshes it. Back to Pick List preserves desktop filters. Bookmark the mobile URL to reopen its date range after signing in; shelf selection lasts for the current session.
+
 In **Pick List**, click a line's **Picked** checkbox to enter the total quantity pulled. The saved quantity replaces the checkbox; click it to edit, or save zero to clear it. Quantities are shared across viewers and survive restarts. Matching uses customer, SO/TO, part, PO, associated WO, and original ship date. Changes to those fields reset picking. Identical matching keys display **Duplicate key** and cannot be picked separately. Each accepted Pick List upload deletes progress for absent or ambiguous keys; a returning line starts unchecked. Filters and Work Center uploads do not clear progress. Picked quantities also appear in printouts and CSV exports. Invalid Pick List uploads preserve existing data; a valid header-only upload clears picking progress.
 
 ## Projects
