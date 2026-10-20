@@ -57,8 +57,8 @@ test('pick list uses the matched WO routing and skips concurrent and completed s
   assert.equal(ctx.formatPickListOperation('', 'Trim'), 'Trim');
   const populated = ctx.createPickListPrintSection({ group: 'Today', rows: [ctx.enrichShippingRow(row(ctx, ''), [job])] });
   assert.match(populated, /<th>Current OP<\/th>\s*<th>Next OP<\/th>/);
-  assert.equal((populated.match(/<col style=/g) || []).length, 13);
-  assert.equal((ctx.createPickListPrintRow(ctx.enrichShippingRow(row(ctx, ''), [job])).match(/<td[ >]/g) || []).length, 13);
+  assert.equal((populated.match(/<col style=/g) || []).length, 14);
+  assert.equal((ctx.createPickListPrintRow(ctx.enrichShippingRow(row(ctx, ''), [job])).match(/<td[ >]/g) || []).length, 14);
 });
 
 test('creation timestamps use their calendar date and tolerate header case', () => {

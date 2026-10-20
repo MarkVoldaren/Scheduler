@@ -10,6 +10,8 @@ const { readWorkCenter } = require("./projects-domain");
 const { createProjectsStore } = require("./projects-store");
 const { createPeopleStore } = require("./people-store");
 const schedulerCore = require("./scheduler-core");
+const pickDomain = require("./pick-list-domain");
+const { createPickListStore } = require("./pick-list-store");
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -77,6 +79,10 @@ db.exec(`
 `);
 
 const app = express();
+const picking = createPickListStore(db);
+function currentPickKeys() {
+  return pickDomain.read(fs.readFileSync(getActiveCsvPath("pick-list"), "utf8"));
+}
 function projectSource() {
   const metadata = getCsvMetadata("work-center");
   try {
@@ -174,6 +180,16 @@ app.get("/api/app-state", (req, res) => {
   });
 });
 
+app.get("/api/pick-progress", (req, res) => {
+  setNoCacheHeaders(res);
+  res.json(picking.list());
+});
+app.put("/api/pick-progress", (req, res, next) => {
+  try {
+    res.json(db.transaction(() => picking.save(req.body || {}, currentPickKeys()))());
+  } catch (error) { next(error); }
+});
+
 app.get("/api/csv/:kind", (req, res) => {
   const kind = normalizeCsvKind(req.params.kind);
   if (!kind) {
@@ -201,6 +217,11 @@ app.post("/api/csv/:kind", upload.single("csv"), (req, res, next) => {
     }
 
     let workCenterRows;
+    let pickKeys;
+    if (kind === "pick-list") {
+      try { pickKeys = pickDomain.read(req.file.buffer.toString("utf8")); }
+      catch (error) { return res.status(400).json({ error: error.message }); }
+    }
     if (kind === "work-center") {
       try {
         workCenterRows = readWorkCenter(req.file.buffer.toString("utf8"));
@@ -229,6 +250,7 @@ app.post("/api/csv/:kind", upload.single("csv"), (req, res, next) => {
         fs.renameSync(tempPath, activePath);
         replaced = true;
         saveCsvMetadata(metadata);
+        if (pickKeys) picking.reconcile(pickKeys);
         if (workCenterRows) {
           projects.reconcile(workCenterRows, metadata.uploadedAt);
           projects.captureDaily(metadata.uploadedAt);
@@ -260,6 +282,7 @@ app.put("/api/settings", (req, res) => {
 // server-side modules must never be downloadable through the static root.
 const publicFiles = new Set(["/", "/index.html", "/app.js", "/styles.css", "/scheduler-core.js", "/projects-ui.js", "/projects-print.js", "/main.js", "/csv.js", "/domain.js", "/render.js", "/selectors.js", "/state.js"]);
 publicFiles.add("/people-ui.js");
+publicFiles.add("/pick-list-domain.js");
 publicFiles.add("/people-domain.js");
 publicFiles.add("/people-print.js");
 const publicAssets = express.static(__dirname, {

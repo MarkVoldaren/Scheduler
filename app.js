@@ -159,6 +159,9 @@ async function init() {
   applyInitialTheme();
   applyInitialSidebar();
   bindEvents();
+  window.addEventListener("focus", () => {
+    if (state.authenticated && state.currentView === "pick-list") refreshPicking(true);
+  });
   setAuthenticated(false);
   renderSharedChrome(refs, state);
   renderError(refs, "Sign in to load the shared schedule.");
@@ -173,6 +176,7 @@ function createInitialState() {
     rawRows: [],
     jobs: [],
     shippingRows: [],
+    pickProgress: {},
     workCenters: [],
     sourceName: DEFAULT_SOURCE_NAME,
     shippingSourceName: "",
@@ -589,6 +593,12 @@ function bindEvents() {
       return;
     }
 
+    const picked = target.closest("[data-picked-key]");
+    if (picked) {
+      event.preventDefault();
+      editPickedQuantity(picked.dataset.pickedKey);
+      return;
+    }
     if (target.closest("[data-pick-list-upload]")) {
       refs.shippingCsvInput.click();
       return;
@@ -718,6 +728,7 @@ async function logout() {
 }
 
 function setAuthenticated(isAuthenticated, message = "") {
+  state.authenticated = isAuthenticated;
   state.authGeneration += 1;
   if (!isAuthenticated && typeof peopleUI !== "undefined") peopleUI.clear();
   if (!isAuthenticated) setAdminAuthenticated(false);
@@ -786,6 +797,7 @@ function setLoginError(message) {
 
 async function loadServerAppState() {
   const appState = await fetchJson("/api/app-state");
+  state.pickProgress = Object.fromEntries((await fetchJson("/api/pick-progress")).map(row => [row.key, row]));
   applyServerOperationalSettings(appState.settings || {});
   state.activeCsvMeta = {
     workCenter: appState.csvs?.workCenter || null,
@@ -826,6 +838,7 @@ async function uploadAndHydrateCsv(kind, file) {
     } else {
       state.activeCsvMeta.pickList = uploadResult.metadata || null;
       hydrateShippingCsv(text, uploadResult.metadata?.originalName || file.name);
+      await refreshPicking();
     }
   } catch (error) {
     console.error(error);
@@ -974,6 +987,12 @@ function hydrateFromCsv(text, sourceName) {
 
 function hydrateShippingCsv(text, sourceName) {
   state.shippingRows = parseShippingScheduleCsv(text);
+  const counts = new Map();
+  state.shippingRows.forEach(row => {
+    row.pickKey = PickListDomain.key(row.raw);
+    counts.set(row.pickKey, (counts.get(row.pickKey) || 0) + 1);
+  });
+  state.shippingRows.forEach(row => { row.pickAmbiguous = counts.get(row.pickKey) !== 1; });
   state.shippingSourceName = sourceName;
   ensureSelectedPickListCustomer(state);
   renderActiveSurface();
@@ -1055,6 +1074,7 @@ function switchView(view) {
     peopleUI.leave();
   }
   setCurrentView(state, view);
+  if (view === "pick-list") refreshPicking(true);
   renderActiveSurface();
   closeMobileSidebar(refs);
   if (view === "capacity" && !state.adminAuthenticated) document.querySelector("#admin-password").focus();
@@ -2271,6 +2291,7 @@ function getPickListViewModel(targetState) {
 
   const enrichedRows = targetState.shippingRows
     .map((row) => enrichShippingRow(row, targetState.jobs))
+    .map((row) => ({ ...row, pulledQuantity: targetState.pickProgress?.[row.pickKey]?.quantity || 0 }))
     .map((row) => ({ ...row, isEnteredToday: Boolean(row.dateCreated && row.dateCreated.getTime() === startOfToday().getTime()) }))
     .filter((row) =>
       matchesPickListFilters(row, selectedCustomer, selectedCustomerDetail, commitmentFilter, acceleratedOnly, dateFrom, dateTo, search)
@@ -4110,6 +4131,7 @@ function createPickListSection(group) {
                     <th>SO / TO</th>
                     <th>P O #</th>
                     <th>Needed</th>
+                    <th>Picked</th>
                     <th>Committed</th>
                     <th>Remaining</th>
                     <th>Status</th>
@@ -4131,6 +4153,59 @@ function createPickListSection(group) {
   `;
 }
 
+function createPickedCell(row) {
+  if (row.pickAmbiguous) return '<span title="Identical matching fields occur more than once. Picking cannot be assigned safely.">Duplicate key</span>';
+  const progress = row.pulledQuantity > 0 ? { quantity: row.pulledQuantity } : null;
+  const key = escapeHtml(row.pickKey);
+  if (progress) return `<button type="button" class="picked-quantity" data-picked-key="${key}" aria-label="Edit quantity pulled for ${escapeHtml(row.partNumber)}">${escapeHtml(String(progress.quantity))}</button>`;
+  return `<input type="checkbox" data-picked-key="${key}" aria-label="Enter quantity pulled for ${escapeHtml(row.partNumber)}" />`;
+}
+
+async function refreshPicking(reloadCsv = false) {
+  if (state.pickingRefreshing) return;
+  const generation = state.authGeneration;
+  state.pickingRefreshing = true;
+  try {
+    if (reloadCsv && state.activeCsvMeta.pickList) {
+      const text = await fetchText("/api/csv/pick-list");
+      if (generation !== state.authGeneration) return;
+      hydrateShippingCsv(text, state.shippingSourceName);
+    }
+    const progress = await fetchJson("/api/pick-progress");
+    if (generation !== state.authGeneration) return;
+    state.pickProgress = Object.fromEntries(progress.map(row => [row.key, row]));
+    if (state.currentView === "pick-list") renderPickListSurface();
+  } catch (error) {
+    alert(error.message || "Unable to refresh picking progress.");
+  } finally { state.pickingRefreshing = false; }
+}
+
+async function editPickedQuantity(key) {
+  if (state.pickingSaving) return;
+  const generation = state.authGeneration;
+  const current = state.pickProgress?.[key];
+  const entered = window.prompt("Total quantity pulled (enter 0 to clear):", String(current?.quantity ?? ""));
+  if (entered === null) return;
+  const quantity = Number(entered);
+  if (!entered.trim() || !Number.isFinite(quantity) || quantity < 0) {
+    alert("Enter a quantity of zero or greater.");
+    return;
+  }
+  state.pickingSaving = true;
+  try {
+    const rows = await fetchJson("/api/pick-progress", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, quantity, revision: current?.revision || null }),
+    });
+    if (generation !== state.authGeneration) return;
+    state.pickProgress = Object.fromEntries(rows.map(row => [row.key, row]));
+    renderPickListSurface();
+  } catch (error) {
+    alert(error.message || "Unable to save quantity pulled.");
+    await refreshPicking(true);
+  } finally { state.pickingSaving = false; }
+}
+
 function createPickListRow(row) {
   const outsourcedTag = isOutsourcedShippingRow(row)
     ? `<span class="pick-list-os-tag" title="${escapeHtml(row.outsourcedSo)}">OS</span>`
@@ -4147,6 +4222,7 @@ function createPickListRow(row) {
       <td>${escapeHtml(row.soTo)}</td>
       <td>${escapeHtml(row.poNumber)}</td>
       <td>${formatHours(row.qtyNeeded)}</td>
+      <td>${createPickedCell(row)}</td>
       <td>${formatHours(row.qtyCommitted)}</td>
       <td class="${row.qtyRemaining > 0 ? "pick-list-short" : ""}">${formatHours(row.qtyRemaining)}</td>
       <td>${createCommitStatusBadge(row.commitmentStatus)}</td>
@@ -4823,6 +4899,7 @@ function createPickListPrintSection(group) {
                   <th>Need Date</th>
                   <th>Part</th>
                   <th>Need</th>
+                  <th>Picked</th>
                   <th>Com</th>
                   <th>Rem</th>
                   <th>Status</th>
@@ -4844,7 +4921,7 @@ function createPickListPrintSection(group) {
 }
 
 function getPickListPrintColgroup() {
-  const widths = [7, 14, 4, 4, 4, 6, 5, 8, 9, 8, 14, 14, 3];
+  const widths = [7, 12, 4, 4, 4, 4, 6, 5, 8, 9, 8, 12, 14, 3];
   return `<colgroup>${widths.map((width) => `<col style="width:${width}%">`).join("")}</colgroup>`;
 }
 
@@ -4860,6 +4937,7 @@ function createPickListPrintRow(row) {
       }${row.isEnteredToday ? '<strong class="entered-today-label">Entered Today</strong>' : ""}</td>
       <td class="part">${escapeHtml(row.partNumber || "")}</td>
       <td class="num">${escapeHtml(formatPrintNumber(row.qtyNeeded))}</td>
+      <td class="num">${row.pickAmbiguous ? "Duplicate" : escapeHtml(String(row.pulledQuantity || ""))}</td>
       <td class="num">${escapeHtml(formatPrintNumber(row.qtyCommitted))}</td>
       <td class="num">${escapeHtml(formatPrintNumber(row.qtyRemaining))}</td>
       <td class="status">${escapeHtml(formatPrintCommitStatus(row.commitmentStatus))}</td>
@@ -4955,6 +5033,7 @@ function createPickListExportRow(group, row) {
     "SO / TO": row.soTo,
     "P O #": row.poNumber,
     "Qty Needed": row.qtyNeeded,
+    "Qty Pulled": row.pickAmbiguous ? "Duplicate key" : (row.pulledQuantity || 0),
     "Qty Committed": row.qtyCommitted,
     "Qty Remaining": row.qtyRemaining,
     "Commit Status": row.commitmentStatus,

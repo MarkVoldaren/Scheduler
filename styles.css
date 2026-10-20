@@ -4197,3 +4197,14 @@ body[data-modal-open="true"] {
 .people-status.is-error { color: var(--danger); }
 #people-unlock { display: flex; gap: 12px; align-items: end; margin: 16px 0; }
 @media (max-width: 700px) { .people-root { padding: 12px; } .people-days { grid-template-columns: repeat(4, minmax(0, 1fr)); } .people-allocation { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); } }
+.picked-quantity {
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: transparent;
+  border: 0;
+  padding: 6px;
+}
