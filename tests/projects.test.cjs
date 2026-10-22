@@ -204,6 +204,29 @@ test("authenticated project APIs persist across viewers, uploads and server rest
   await upload(csv([row("W1", "C1"), row("W4", "C1"), row("W3", "C2"), row("W5", "C2")]));
   d = await api(url); assert.equal(d.summary.workOrderCount, 3); assert.equal(d.summary.remainingHours, 30);
   assert.deepEqual(d.members[0].workOrders.map(wo => wo.identifier), ["W1", "W4"]);
+  // Closed-only uploads preserve source bytes but behave as empty active work.
+  const closedCsv = csv([row("W1", "C1", { Status: "Closed" }), row("W4", "C1", { Status: " closed " }), row("W3", "C2", { Status: "CLOSED" })]);
+  await upload(closedCsv);
+  assert.equal(fs.readFileSync(path.join(dataDir, "uploads/work-center.csv"), "utf8"), closedCsv);
+  const download = await fetch(`${base}/api/csv/work-center`, { headers: { Cookie: cookie } });
+  assert.equal(download.status, 200);
+  assert.equal(await download.text(), closedCsv);
+  assert.deepEqual((await api("/projects/candidates")).candidates, []);
+  d = await api(url);
+  assert.equal(d.summary.remainingHours, 0);
+  assert.equal(d.summary.progress, 100);
+  assert.equal(d.summary.quantity, 300);
+  assert.equal(d.summary.remainingOperations, 0);
+  assert.ok(d.members.every(member => member.inferredComplete));
+  const closedDetail = d;
+  await upload("wrong,columns\n1,2", 400);
+  assert.equal(fs.readFileSync(path.join(dataDir, "uploads/work-center.csv"), "utf8"), closedCsv);
+  assert.deepEqual(await api(url), closedDetail);
+  // Reopening restores live work, before testing a valid header-only upload.
+  await upload(csv([row("W1", "C1"), row("W4", "C1"), row("W3")]));
+  d = await api(url);
+  assert.equal(d.summary.remainingHours, 30);
+  assert.ok(d.members.every(member => !member.inferredComplete));
   // Header-only CSV is valid: infer completion while retaining quantities.
   await upload(csv([]));
   d = await api(url); assert.equal(d.summary.remainingHours, 0); assert.equal(d.summary.progress, 100); assert.equal(d.summary.quantity, 300);

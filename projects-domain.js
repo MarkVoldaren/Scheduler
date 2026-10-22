@@ -4,7 +4,9 @@ const core = require("./scheduler-core");
 
 const REQUIRED_HEADERS = ["WO #", "Combo #", "Customer", "Part", "Description", "Operation Sequence", "Manufacturing Work Center", "Hours Remaining", "WO Quantity", "Status", "Completed Quantity", "Remaining Quantity"];
 
-function readWorkCenter(text) {
+// Operational consumers receive active work by default. Metrics may explicitly
+// request closed rows without bypassing structural CSV validation.
+function readWorkCenter(text, { includeClosed = false } = {}) {
   text = String(text).replace(/^\uFEFF/, "");
   let quoted = false;
   for (let i = 0; i < text.length; i += 1) {
@@ -25,7 +27,7 @@ function readWorkCenter(text) {
   const records = core.parseCsv(`${text}\n${headers.map(() => "x").join(",")}`);
   const sentinel = records.pop() || {};
   if (Object.keys(sentinel).some(header => header !== header.trim())) throw new Error("Work-center CSV column names must not contain leading or trailing spaces.");
-  return records.filter(core.isSchedulableRow);
+  return records.filter(includeClosed ? core.isSchedulableRow : core.isActiveWorkRow);
 }
 
 function memberRows(rows, type, identifier) {

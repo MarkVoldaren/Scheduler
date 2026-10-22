@@ -133,6 +133,14 @@ function isSchedulableRow(row) {
   return true;
 }
 
+function isClosedRow(row) {
+  return String(row.Status || "").trim().toLowerCase() === "closed";
+}
+
+function isActiveWorkRow(row) {
+  return isSchedulableRow(row) && !isClosedRow(row);
+}
+
 function parseNumber(value) {
   const number = Number.parseFloat(String(value || "").replace(/,/g, "").trim());
   return Number.isFinite(number) ? number : 0;
@@ -149,7 +157,7 @@ function parseDate(value) {
 function buildJobs(rows) {
   const groups = new Map();
 
-  rows.forEach((row) => {
+  rows.filter(isActiveWorkRow).forEach((row) => {
     const workOrder = (row["WO #"] || "").trim();
     const combo = (row["Combo #"] || "").trim();
     const groupKey = combo ? `combo:${combo}` : `wo:${workOrder}`;
@@ -475,5 +483,5 @@ function isKnownDate(date) {
   return date instanceof Date && !Number.isNaN(date.getTime()) && date.getTime() !== MAX_DATE.getTime();
 }
 
-return { parseCsv, parseCsvMatrix, isSchedulableRow, parseNumber, parseDate, buildJobs, normalizeGroup, calculateProductionDate, calculateOverallProgress, formatDate, startOfToday, stripTime, finalizeOperation, applyClaimCorrection, summarizeStatus, normalizeStatus, statusFromRank, createOperationKey, compareOperations, addDays, subtractWorkingDays, isWorkingDay, unique, clamp, isKnownDate };
+return { parseCsv, parseCsvMatrix, isSchedulableRow, isClosedRow, isActiveWorkRow, parseNumber, parseDate, buildJobs, normalizeGroup, calculateProductionDate, calculateOverallProgress, formatDate, startOfToday, stripTime, finalizeOperation, applyClaimCorrection, summarizeStatus, normalizeStatus, statusFromRank, createOperationKey, compareOperations, addDays, subtractWorkingDays, isWorkingDay, unique, clamp, isKnownDate };
 });

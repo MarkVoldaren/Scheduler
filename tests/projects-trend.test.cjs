@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const Database = require('better-sqlite3');
 const { createProjectsStore, chicagoDate } = require('../projects-store');
-const { projectView } = require('../projects-domain');
+const { projectView, readWorkCenter } = require('../projects-domain');
 const row = (wo, combo = '', extra = {}) => ({ 'WO #': wo, 'Combo #': combo, Part: 'P', Customer: 'Customer', Description: 'Part', 'Operation Sequence': '1', 'Operation Name': 'Print', 'Manufacturing Work Center': 'Screen', 'Hours Remaining': '5', 'WO Quantity': '100', Status: 'In Process', 'Completed Quantity': '20', 'Remaining Quantity': '80', ...extra });
 
 test('trend counts normalized open operations, including zero-hour open work', () => {
@@ -20,6 +20,40 @@ test('Central dates respect midnight and both daylight saving transitions', () =
   assert.equal(chicagoDate('2026-03-08T08:00:00Z'), '2026-03-08');
   assert.equal(chicagoDate('2026-11-01T06:30:00Z'), '2026-11-01');
   assert.equal(chicagoDate('2026-11-01T07:30:00Z'), '2026-11-01');
+});
+
+test('closed uploads record zero remaining operations and reopening restores the trend', () => {
+  const db = new Database(':memory:');
+  let now = '2026-10-20T12:00:00Z';
+  const parse = status => {
+    const r = row('W1', '', { Status: status });
+    return readWorkCenter([Object.keys(r).join(','), Object.values(r).join(',')].join('\n'));
+  };
+  let source = { rows: parse('Released'), metadata: { uploadedAt: now } };
+  const store = createProjectsStore(db, () => source, () => new Date(now));
+  const upload = status => {
+    source = { rows: parse(status), metadata: { uploadedAt: now } };
+    store.reconcile(source.rows, now);
+    store.captureDaily(now);
+  };
+  try {
+    let d = store.create({ name: 'Closed work' });
+    const id = d.project.id;
+    d = store.add(id, { revision: d.project.revision, members: [{ type: 'wo', identifier: 'W1' }] });
+    assert.equal(d.trend.readings.at(-1).remainingOperations, 1);
+    now = '2026-10-21T12:00:00Z';
+    upload(' closed ');
+    d = store.detail(id);
+    assert.equal(d.trend.readings.at(-1).remainingOperations, 0);
+    assert.equal(d.summary.quantity, 100);
+    assert.equal(d.summary.progress, 100);
+    assert.equal(d.members[0].inferredComplete, true);
+    now = '2026-10-22T12:00:00Z';
+    upload('In Process');
+    d = store.detail(id);
+    assert.equal(d.trend.readings.at(-1).remainingOperations, 1);
+    assert.equal(d.members[0].inferredComplete, false);
+  } finally { db.close(); }
 });
 
 test('daily readings preserve baselines, scope history, archived work and transactional rollback', () => {
