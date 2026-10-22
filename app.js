@@ -765,6 +765,7 @@ function setAuthenticated(isAuthenticated, message = "") {
   state.authenticated = isAuthenticated;
   state.authGeneration += 1;
   if (!isAuthenticated && typeof peopleUI !== "undefined") peopleUI.clear();
+  if (!isAuthenticated && globalThis.HoursUI) globalThis.HoursUI.clear();
   if (!isAuthenticated) setAdminAuthenticated(false);
   document.body.dataset.auth = isAuthenticated ? "unlocked" : "locked";
   refs.loginScreen.hidden = isAuthenticated;
@@ -855,6 +856,7 @@ async function loadServerAppState() {
     renderError(refs, "No work-center CSV uploaded yet. Choose CSV to create the active schedule.");
   }
   if (state.currentView === "projects") projectsUI.refresh();
+  if (globalThis.HoursUI) await globalThis.HoursUI.refresh();
 }
 
 async function uploadAndHydrateCsv(kind, file) {
@@ -5382,6 +5384,7 @@ function createFlowLocationSection(group) {
   const backlog = group.backlog;
   return `
     <section class="kpi-flow-group kpi-flow-${slugify(group.flowLocation)}" style="--flow-span:${getFlowLocationColumnSpan(group)}">
+      <div class="kpi-flow-header">
       <div class="kpi-flow-group-head">
         <div>
           <h3>${escapeHtml(group.flowLocation)}</h3>
@@ -5389,6 +5392,7 @@ function createFlowLocationSection(group) {
         <span class="kpi-flow-count">${group.departments.length} ${group.departments.length === 1 ? "department" : "departments"}</span>
       </div>
       <div class="kpi-backlog-control">
+        <button type="button" class="kpi-backlog-toggle kpi-flow-hours" data-hours-flow="${escapeHtml(group.flowLocation)}"><span>Booked / Earned</span></button>
         <button
           class="kpi-backlog-toggle"
           type="button"
@@ -5426,6 +5430,7 @@ function createFlowLocationSection(group) {
               .join("")}
           </div>
         </section>
+      </div>
       </div>
       <div class="kpi-card-grid">
         ${group.departments.map(createDepartmentLoadCard).join("")}
@@ -5500,6 +5505,9 @@ function createDepartmentLoadCard(department) {
         <span>Shift: +${department.horizonShift || 0} days</span>
       </div>
       ${createDailyLoadHeatStrip(department.dailyLoad)}
+      <div class="kpi-card-actions">
+        <button type="button" class="kpi-card-hours" data-hours-center="${escapeHtml(department.department)}" aria-label="${escapeHtml(department.department)} booked and earned hours"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true"><path d="M2 2v12h12M4 10l3-4 3 2 4-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Booked / Earned</span><span aria-hidden="true">↗</span></button>
+      </div>
     </article>
   `;
 }

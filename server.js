@@ -11,6 +11,7 @@ const { createProjectsStore } = require("./projects-store");
 const { createPeopleStore } = require("./people-store");
 const schedulerCore = require("./scheduler-core");
 const pickDomain = require("./pick-list-domain");
+const hoursDomain = require("./hours-domain");
 const { createPickListStore } = require("./pick-list-store");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -25,6 +26,7 @@ const SESSION_COOKIE_NAME = "scheduler-session";
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 50 * 1024 * 1024);
 
 const CSV_KINDS = {
+  "earned-hours": { activeName: "earned-hours.csv", label: "Earned Hours" },
   "work-center": {
     activeName: "work-center.csv",
     label: "Work Center",
@@ -176,6 +178,7 @@ app.get("/api/app-state", (req, res) => {
     csvs: {
       workCenter: getCsvMetadata("work-center"),
       pickList: getCsvMetadata("pick-list"),
+      earnedHours: getCsvMetadata("earned-hours"),
     },
   });
 });
@@ -217,6 +220,10 @@ app.post("/api/csv/:kind", upload.single("csv"), (req, res, next) => {
     }
 
     let workCenterRows;
+    if (kind === "earned-hours") {
+      try { hoursDomain.readEarned(req.file.buffer.toString("utf8")); }
+      catch (error) { return res.status(400).json({ error: error.message }); }
+    }
     let pickKeys;
     if (kind === "pick-list") {
       try { pickKeys = pickDomain.read(req.file.buffer.toString("utf8")); }
@@ -282,6 +289,8 @@ app.put("/api/settings", (req, res) => {
 // server-side modules must never be downloadable through the static root.
 const publicFiles = new Set(["/", "/index.html", "/app.js", "/styles.css", "/scheduler-core.js", "/projects-ui.js", "/projects-print.js", "/main.js", "/csv.js", "/domain.js", "/render.js", "/selectors.js", "/state.js"]);
 publicFiles.add("/people-ui.js");
+publicFiles.add("/hours-domain.js");
+publicFiles.add("/hours-ui.js");
 publicFiles.add("/pick-list-domain.js");
 publicFiles.add("/people-domain.js");
 publicFiles.add("/people-print.js");

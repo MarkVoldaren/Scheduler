@@ -32,6 +32,16 @@ async function server(t, adminPassword = 'admin-test') {
     let cookie = initialCookie;
     return {
       get cookie() { return cookie; },
+      async csv(text, expected = 200) {
+        const form = new FormData();
+        form.append('csv', new Blob([text], {type:'text/csv'}), 'earned.csv');
+        const response = await fetch(base + '/api/csv/earned-hours', {method:'POST',headers:{Cookie:cookie},body:form});
+        assert.equal(response.status,expected,await response.text());
+      },
+      async csvText() {
+        const response = await fetch(base + '/api/csv/earned-hours', {headers:{Cookie:cookie}});
+        assert.equal(response.status,200); return response.text();
+      },
       async request(route, method = 'GET', body, status = 200) {
         const response = await fetch(base + '/api' + route, { method, headers: { Cookie: cookie, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
         const cookies = response.headers.getSetCookie();
@@ -79,6 +89,30 @@ test('Missing admin password keeps the app usable and Capacity locked', async t 
   await a.request('/app-state');
   await a.request('/admin/unlock', 'POST', { password: '' }, 403);
   await a.request('/settings', 'PUT', {}, 403);
+});
+
+test('earned upload replaces totals, preserves valid data on rejection and survives restart', async t => {
+  const app = await server(t); await app.start(); const a = app.client();
+  await a.request('/login', 'POST', { password: 'app-test' });
+  assert.equal((await a.request('/app-state')).csvs.earnedHours, null);
+  const header = 'Manufacturing Work Center,Date,Earned Hours (Sum)\n';
+  const first = header + 'Die Cut,10/1/2026,12.5\n';
+  const replacement = header + 'Die Cut,10/1/2026,15.75\n';
+  await a.csv(first); assert.equal(await a.csvText(),first);
+  assert.equal((await a.request('/app-state')).csvs.earnedHours.originalName,'earned.csv');
+  await a.csv(header + 'Die Cut,2/30/2026,nope',400);
+  assert.equal(await a.csvText(),first);
+  await a.csv(replacement); assert.equal(await a.csvText(),replacement);
+  await app.stop(); await app.start();
+  assert.equal(await a.csvText(),replacement);
+  const detail = 'Date,Created From,Operation Sequence,Manufacturing Work Center,Completed Quantity,Labor Setup Time (Min),Labor Run Time (Min),Earned Hours\n10/1/2026,Work Order #WO1,2,Die Cut,10,12,20,\n';
+  await a.csv(detail); assert.equal(await a.csvText(),detail);
+  await a.csv(detail.replace(',10,12,20,',',bad,12,20,'),400);
+  assert.equal(await a.csvText(),detail);
+  await app.stop(); await app.start();
+  assert.equal(await a.csvText(),detail);
+  const parsed = require('../hours-domain').readEarned(await a.csvText());
+  assert.equal(parsed[0].hours,null); assert.equal(parsed[0].runMinutes,20);
 });
 
 test('Matching app and admin passwords are rejected', async t => {
