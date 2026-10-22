@@ -199,19 +199,20 @@ function normalizeGroup(group) {
     const sequenceNumber = parseNumber(row["Operation Sequence"]);
     const operationName = (row["Operation Name"] || row["Formula (Text)"] || "").trim() || "Operation";
     const workCenter = (row["Manufacturing Work Center"] || "").trim() || "Unassigned";
-    const hoursRemaining = parseNumber(row["Hours Remaining"]);
+    const hoursRemaining = Math.max(0, parseNumber(row["Hours Remaining"]));
     const status = normalizeStatus(row.Status);
     const woQty = parseNumber(row["WO Quantity"]);
     const completedQuantity = parseNumber(row["Completed Quantity"]);
     const remainingQuantity = parseNumber(row["Remaining Quantity"]);
-    const qtyCompleted = parseNumber(row["Qty Completed"]);
-    const totalQuantity = woQty || completedQuantity + remainingQuantity || qtyCompleted + remainingQuantity || 0;
-    const effectiveCompleted =
-      completedQuantity > 0
-        ? completedQuantity
-        : totalQuantity > 0 && remainingQuantity > 0
-          ? Math.max(totalQuantity - remainingQuantity, 0)
-          : qtyCompleted;
+    const hasQuantity = value => String(value ?? "").trim() !== "" &&
+      Number.isFinite(Number(String(value).replace(/,/g, "").trim()));
+    const hasCompleted = hasQuantity(row["Completed Quantity"]);
+    const hasRemaining = hasQuantity(row["Remaining Quantity"]);
+    const derivedTotal = hasCompleted && hasRemaining ? completedQuantity + remainingQuantity : 0;
+    const totalQuantity = woQty > 0 ? woQty : Math.max(0, derivedTotal);
+    const effectiveCompleted = hasCompleted ? completedQuantity :
+      totalQuantity > 0 && hasRemaining ? totalQuantity - remainingQuantity : 0;
+    const rowDone = totalQuantity > 0 && effectiveCompleted >= totalQuantity;
 
     const operationKey = createOperationKey(sequenceNumber || 0, workCenter, operationName);
     if (!operationMap.has(operationKey)) {
@@ -235,11 +236,11 @@ function normalizeGroup(group) {
     const operation = operationMap.get(operationKey);
     operation.rows.push(row);
     operation.sourceRowCount += 1;
-    operation.hoursRemaining += hoursRemaining;
-    operation.completedQuantity += effectiveCompleted;
+    operation.hoursRemaining += rowDone ? 0 : hoursRemaining;
+    operation.completedQuantity += clamp(effectiveCompleted, 0, totalQuantity);
     operation.totalQuantity += totalQuantity;
     operation.statusRank = Math.max(operation.statusRank, status.rank);
-    operation.isDone = operation.isDone && status.isDone && hoursRemaining <= 0;
+    operation.isDone = operation.isDone && rowDone;
   });
 
   const operations = [...operationMap.values()]
@@ -342,9 +343,9 @@ function stripTime(date) {
 function finalizeOperation(operation) {
   const quantityProgress =
     operation.totalQuantity > 0 ? clamp(operation.completedQuantity / operation.totalQuantity, 0, 1) : null;
-  const status = statusFromRank(operation.statusRank);
+  const status = operation.isDone ? "Complete" : statusFromRank(operation.statusRank);
   const phase = operation.isDone ? "complete" : "future";
-  const progressRatio = operation.isDone ? 1 : quantityProgress ?? (operation.hoursRemaining <= 0 ? 1 : 0);
+  const progressRatio = operation.isDone ? 1 : quantityProgress ?? 0;
 
   return {
     ...operation,

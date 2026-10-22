@@ -5717,7 +5717,7 @@ function createWorkOrderScheduleModal(job, focusOperationId) {
       ${renderMiniSequenceTrack(job, focusOperationId)}
     </div>
     <div class="work-order-operation-list">
-      ${getSequenceDisplayOperations(job).map((operation) => createWorkOrderOperationRow(operation, operation.key === focusOperationId)).join("")}
+      ${job.operations.map((operation) => createWorkOrderOperationRow(operation, operation.key === focusOperationId)).join("")}
     </div>
   `;
 }
@@ -5731,41 +5731,17 @@ function createWorkOrderOperationRow(operation, isFocus) {
       </div>
       <div class="work-order-operation-stats">
         <span>${escapeHtml(operation.status || operation.phase)}</span>
-        <strong>${operation.isClosedSource ? "Completed" : `${formatHours(operation.hoursRemaining)} hrs`}</strong>
+        <strong>${operation.phase === "complete" ? "Completed" : `${formatHours(operation.hoursRemaining)} hrs`}</strong>
       </div>
     </div>
   `;
-}
-
-// Closed source rows enrich missing sequence slots for display only. Keep them
-// out of job.operations so scheduling, progress and workload totals stay active-only.
-function getSequenceDisplayOperations(job) {
-  if (!job.workOrders?.length || !job.operations.length) return job.operations;
-  const sequences = new Set(job.operations.map(operation => operation.sequence));
-  const lastSequence = Math.max(...sequences);
-  const workOrders = new Set(job.workOrders);
-  const rows = state.rawRows.filter(row =>
-    globalThis.SchedulerCore.isClosedRow(row) &&
-    workOrders.has(String(row["WO #"] || "").trim()) &&
-    parseNumber(row["Operation Sequence"]) >= 1 &&
-    parseNumber(row["Operation Sequence"]) < lastSequence &&
-    !sequences.has(parseNumber(row["Operation Sequence"]))
-  );
-  if (!rows.length) return job.operations;
-  const recovered = normalizeGroup({
-    key: job.key, combo: job.combo || "", workOrders, rows,
-  }).operations.map(operation => ({
-    ...operation, phase: "complete", status: "Closed", isClosedSource: true,
-    isDone: true, progressRatio: 1, progressPercent: 100, fillRatio: 1,
-  }));
-  return [...job.operations, ...recovered].sort(compareOperations);
 }
 
 function renderMiniSequenceTrack(job, focusOperationId) {
   const segments = [];
   let previousSequence = null;
 
-  getSequenceDisplayOperations(job).forEach((operation) => {
+  job.operations.forEach((operation) => {
     if (previousSequence === null && operation.sequence > 1) {
       for (let sequence = 1; sequence < operation.sequence; sequence += 1) {
         segments.push(
@@ -5797,7 +5773,7 @@ function renderMiniSequenceTrack(job, focusOperationId) {
     segments.push(
       createMiniTrackSegment({
         classes,
-        title: operation.isClosedSource ? `${operation.workCenter} | ${operation.operationName} | Completed` : `${operation.workCenter || operation.sequenceLabel} | ${operation.operationName || "Operation"} | ${formatHours(
+        title: operation.phase === "complete" ? `${operation.workCenter} | ${operation.operationName} | Completed` : `${operation.workCenter || operation.sequenceLabel} | ${operation.operationName || "Operation"} | ${formatHours(
           operation.hoursRemaining
         )} Hours`,
         label: formatOperationTrackLabel(operation),
@@ -5812,7 +5788,7 @@ function renderMiniSequenceTrack(job, focusOperationId) {
 }
 
 function formatOperationTrackLabel(operation) {
-  if (operation.isClosedSource) {
+  if (operation.phase === "complete") {
     return `${operation.operationName} | Completed`;
   }
   const operationLabel = operation.workCenter || operation.operationName || operation.sequenceLabel;
