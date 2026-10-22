@@ -33,5 +33,17 @@
     return { weeklyHours, allocations: allocations.map(item => ({ ...item, weeklyHours: weeklyHours * Number(item.percent || 0) / 100,
       dailyHours: Object.fromEntries(days.map(day => [day, Number(hours[day] || 0) * Number(item.percent || 0) / 100])) })) };
   }
-  return { days, validate, totals };
+  function departmentHours(people, departments = []) {
+    const result = Object.create(null);
+    const empty = () => Object.fromEntries(days.map(day => [day, 0]));
+    departments.forEach(department => { result[department] = empty(); });
+    people.filter(person => !person.archived).forEach(person => {
+      person.allocations.forEach(({ department, percent }) => {
+        const schedule = result[department] || (result[department] = empty());
+        days.forEach(day => { schedule[day] += Number(person.hours[day] || 0) * percent / 100; });
+      });
+    });
+    return result;
+  }
+  return { days, validate, totals, departmentHours };
 });

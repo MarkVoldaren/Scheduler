@@ -9,6 +9,22 @@ const domain = require('../people-domain');
 const { createPeopleStore } = require('../people-store');
 const sample = () => ({ name: ' Jamie Rivera ', hours: { mon: 8, tue: 8, wed: 8, thu: 8, fri: 8, sat: 0, sun: 0 }, allocations: [{ department: 'Shearcut', percent: 60 }, { department: 'Kitting', percent: 40 }] });
 
+test('department hours aggregate active weekday splits without rounding or losing unavailable assignments', () => {
+  const a = sample();
+  a.hours = { mon: 7.25, tue: 6, wed: 0, thu: 8, fri: 4, sat: 3, sun: 2 };
+  a.allocations = [{ department: 'Shearcut', percent: 33.33 }, { department: 'Unavailable', percent: 66.67 }];
+  const b = sample();
+  const archived = { ...sample(), archived: true };
+  const result = domain.departmentHours([a, b, archived], ['Shearcut', 'Kitting', 'Empty']);
+  for (const day of domain.days) {
+    assert.ok(Math.abs(result.Shearcut[day] - (a.hours[day] * .3333 + b.hours[day] * .6)) < 1e-12);
+    assert.ok(Math.abs(result.Unavailable[day] - a.hours[day] * .6667) < 1e-12);
+    assert.equal(result.Empty[day], 0);
+  }
+  assert.equal(domain.departmentHours([], ['Empty']).Empty.mon, 0);
+  assert.equal(domain.departmentHours([{ ...archived, archived: false }]).Shearcut.mon, 4.8);
+});
+
 test('People validates exact allocations and calculates weekly and daily hours', () => {
   const input = sample(), normalized = domain.validate(input, ['Shearcut', 'Kitting']);
   assert.equal(normalized.name, 'Jamie Rivera');
@@ -96,14 +112,17 @@ test('People API enforces permissions, persists after restart and leaves Capacit
   const input = { ...sample(), allocations: [{ department: catalog.departments[0], percent: 100 }] };
   const before = await admin('/api/app-state');
   let person = await admin('/api/people', 'POST', input, 201);
+  assert.equal((await viewer('/api/app-state')).peopleManHoursByDay[input.allocations[0].department].mon, 8);
   await viewer(`/api/people/${person.id}`, 'PUT', person, 403);
   await viewer(`/api/people/${person.id}/archive`, 'PUT', { revision: 1, archived: true }, 403);
   person = await admin(`/api/people/${person.id}`, 'PUT', { ...person, name: 'Updated' });
   await admin(`/api/people/${person.id}`, 'PUT', { ...person, revision: 1 }, 409);
   person = await admin(`/api/people/${person.id}/archive`, 'PUT', { revision: person.revision, archived: true });
   assert.equal((await viewer('/api/people')).people[0].archived, true);
+  assert.equal((await viewer('/api/app-state')).peopleManHoursByDay[input.allocations[0].department].mon, 0);
   person = await admin(`/api/people/${person.id}/archive`, 'PUT', { revision: person.revision, archived: false });
   assert.deepEqual((await admin('/api/app-state')).settings, before.settings);
+  assert.equal((await viewer('/api/app-state')).peopleManHoursByDay[input.allocations[0].department].mon, 8);
   await stop(); await start();
   assert.equal((await viewer('/api/people')).people[0].name, 'Updated');
   await viewer('/people-store.js', 'GET', undefined, 404);

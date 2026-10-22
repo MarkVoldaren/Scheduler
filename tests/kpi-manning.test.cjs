@@ -23,6 +23,7 @@ function state(jobs = []) {
     flowLocations: { Alpha: 'Cutting', Zeta: 'Cutting', Idle: 'Finishing' },
     machineCapacities: {}, manHourCapacities: { Alpha: 8, Zeta: 4, Idle: 16 },
     manHoursByDay: { Alpha: { sat: 0, sun: 0 }, Zeta: { sat: 0, sun: 0 }, Idle: { sat: 0, sun: 0 } }, temporaryAdditionalManning: { Alpha: 0.5, Idle: 2 },
+    peopleManHoursByDay: Object.fromEntries([['Alpha', 8], ['Zeta', 4], ['Idle', 16]].map(([name, hours]) => [name, { mon: hours, tue: hours, wed: hours, thu: hours, fri: hours, sat: 0, sun: 0 }])),
     capacityModes: {}, capacityHorizonShifts: {}, manningMultipliers: {},
   };
 }
@@ -30,6 +31,31 @@ function job(offset, hours, phase = 'current', department = 'Alpha') {
   return { key: `${offset}-${phase}-${hours}`, shipByDate: offset === null ? null : core.addDays(today, offset), operations: [{ workCenter: department, phase, hoursRemaining: hours }] };
 }
 function near(actual, expected) { assert.ok(Math.abs(actual - expected) < 0.0001, `${actual} != ${expected}`); }
+
+test('People hours replace manual labor and feed capacity modes and staffing exactly once', () => {
+  const c = context(), s = state();
+  s.peopleManHoursByDay = require('../people-domain').departmentHours([
+    { hours: { mon: 10, tue: 6, sat: 4 }, allocations: [{ department: 'Alpha', percent: 50 }, { department: 'Zeta', percent: 50 }] },
+  ]);
+  s.manHoursByDay.Alpha = { mon: 999 };
+  s.machineCapacities.Alpha = 12;
+  s.manningMultipliers.Alpha = 2;
+  near(c.getRawManHoursForDate(s, 'Alpha', today), 5);
+  near(c.getManHoursForDate(s, 'Alpha', today), 18); // (5 + 0.5 * 8) * 2
+  near(c.getWeeklyManningHours(s, 'Alpha'), 10);
+  near(c.getRawManHoursForDate(s, 'Empty', today), 0);
+  near(c.getManHoursForDate(s, 'Alpha', core.addDays(today, 5)), 4); // Saturday: no temporary staffing
+  s.capacityModes.Alpha = 'Labor constrained';
+  near(c.getEffectiveCapacityForDate(s, 'Alpha', today), 18);
+  s.capacityModes.Alpha = 'Machine constrained';
+  near(c.getEffectiveCapacityForDate(s, 'Alpha', today), 12);
+  s.capacityModes.Alpha = 'Both constrained';
+  near(c.getEffectiveCapacityForDate(s, 'Alpha', today), 12);
+  const markup = c.createCapacityManningDayInput({ center: 'Alpha', manHoursByDay: { mon: 5 }, temporaryManning: 0 }, { key: 'mon', label: 'Mon' });
+  assert.match(markup, /readonly/);
+  assert.match(markup, /calculated from People/);
+  assert.doesNotMatch(markup, /data-man-day-center/);
+});
 
 test('needed manning excludes overdue demand but keeps today and undated demand', () => {
   const c = context();

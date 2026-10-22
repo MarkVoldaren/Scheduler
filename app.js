@@ -122,6 +122,10 @@ const peopleUI = globalThis.createPeopleUI({
   isAdmin: () => state.adminAuthenticated,
   isActive: () => state.currentView === "people" && document.body.dataset.auth === "unlocked",
   lock: () => setAdminAuthenticated(false),
+  onChanged: async () => {
+    try { await refreshPeopleCapacity(); }
+    catch (error) { alert("Person saved, but capacity could not refresh: " + error.message); }
+  },
   buildReport: async () => {
     const [roster, configuration] = await Promise.all([fetchJson("/api/people"), fetchJson("/api/app-state")]);
     const names = [...new Set([...roster.departments, ...roster.people.filter(person => !person.archived).flatMap(person => person.allocations.map(a => a.department))])];
@@ -135,6 +139,7 @@ const peopleUI = globalThis.createPeopleUI({
     const appState = await fetchJson("/api/app-state");
     if (generation !== state.authGeneration) return;
     applyServerOperationalSettings(appState.settings || {});
+    state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
     syncCapacities(state); syncFlowLocations(state); setAdminAuthenticated(true);
   },
 });
@@ -188,6 +193,7 @@ function createInitialState() {
     machineCapacities: {},
     manHourCapacities: {},
     manHoursByDay: {},
+    peopleManHoursByDay: {},
     temporaryAdditionalManning: {},
     manningMultipliers: {},
     capacityModes: {},
@@ -536,6 +542,7 @@ function bindEvents() {
       return;
     }
 
+    if (target.closest("[data-capacity-people]")) { switchView("people"); return; }
     if (target.closest("[data-capacity-reset]")) {
       resetCapacityFilters(state);
       renderCapacitySurface();
@@ -810,6 +817,7 @@ async function unlockCapacity(event) {
     const appState = await fetchJson("/api/app-state");
     if (generation !== state.authGeneration) return;
     applyServerOperationalSettings(appState.settings || {});
+    state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
     syncCapacities(state);
     syncFlowLocations(state);
     setAdminAuthenticated(true);
@@ -834,6 +842,7 @@ async function loadServerAppState() {
   const appState = await fetchJson("/api/app-state");
   state.pickProgress = Object.fromEntries((await fetchJson("/api/pick-progress")).map(row => [row.key, row]));
   applyServerOperationalSettings(appState.settings || {});
+  state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
   state.activeCsvMeta = {
     workCenter: appState.csvs?.workCenter || null,
     pickList: appState.csvs?.pickList || null,
@@ -1109,11 +1118,25 @@ function renderExpediteSurface() {
   renderExpediteHelper(refs, getExpediteViewModel(state));
 }
 
-function switchView(view) {
+async function refreshPeopleCapacity() {
+  const generation = state.authGeneration;
+  const appState = await fetchJson("/api/app-state");
+  if (generation !== state.authGeneration) return;
+  state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
+}
+
+async function switchView(view) {
+  const generation = state.authGeneration;
+  const navigation = state.capacityNavigation = (state.capacityNavigation || 0) + 1;
   if (state.currentView === "people" && view !== "people") {
     if (!peopleUI.canLeave()) return;
     peopleUI.leave();
   }
+  if (["capacity", "sequencers", "departments", "kpi", "expedite"].includes(view)) {
+    try { await refreshPeopleCapacity(); }
+    catch (error) { alert("Unable to refresh People capacity: " + error.message); return; }
+  }
+  if (generation !== state.authGeneration || navigation !== state.capacityNavigation) return;
   setCurrentView(state, view);
   if (view === "pick-list") refreshPicking(true);
   renderActiveSurface();
@@ -1484,7 +1507,7 @@ function getManHoursPerDay(targetState, center) {
 }
 
 function getManHoursByDay(targetState, center) {
-  return normalizeManHoursByDay(targetState.manHoursByDay?.[center], getManHoursPerDay(targetState, center));
+  return normalizeManHoursByDay(targetState.peopleManHoursByDay?.[center], 0);
 }
 
 function getRawManHoursForDate(targetState, center, date) {
@@ -3854,7 +3877,7 @@ function renderCapacity(targetRefs, viewModel) {
 
   const markup = `
     <div class="capacity-page-copy">
-      <span>Set machine capacity, labor hours, capacity mode, and flow location for each department.</span>
+      <span>Set machine capacity, capacity mode, and flow location for each department.</span>
       <span>Effective Capacity is calculated from Machine Capacity, Man Hours, and Capacity Mode.</span>
     </div>
     ${createCapacitySummaryStrip(viewModel.summary)}
@@ -4619,7 +4642,8 @@ function createCapacityDepartmentCard(card, viewModel) {
           </div>
         </div>
         <div class="capacity-manning-section">
-          <span class="capacity-manning-label">Manning Hours / Day</span>
+          <span class="capacity-manning-label">Manning Hours / Day · Calculated from People</span>
+          <button type="button" class="button button-secondary" data-capacity-people>Edit People</button>
           <div class="capacity-manning-grid">
             ${viewModel.weekdayOptions.map((day) => createCapacityManningDayInput(card, day)).join("")}
           </div>
@@ -4668,10 +4692,8 @@ function createCapacityManningDayInput(card, day) {
         inputmode="decimal"
         autocomplete="off"
         spellcheck="false"
-        value="${escapeHtml(String(value))}"
-        data-man-day-center="${escapeHtml(card.center)}"
-        data-man-day="${escapeHtml(day.key)}"
-        data-saved-value="${escapeHtml(String(value))}"
+        value="${escapeHtml(formatHours(value))}"
+        readonly aria-label="${escapeHtml(day.label)} hours calculated from People"
       />
       <small>hrs</small>
       ${tempHours > 0 ? `<small class="capacity-temp-hours">Temp +${formatHours(tempHours)} hrs</small>` : ""}

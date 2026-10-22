@@ -5,7 +5,7 @@
   const number = value => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
   const allocated = value => Number(value || 0).toFixed(2);
   const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  globalThis.createPeopleUI = function ({ root, request, isAdmin, unlock, lock, isActive, buildReport }) {
+  globalThis.createPeopleUI = function ({ root, request, isAdmin, unlock, lock, isActive, buildReport, onChanged = async () => {} }) {
     let pendingReport = null;
     let people = [], departments = [], draft = null, baseline = '', retained = [];
     let search = '', department = '', archived = false, error = '', notice = '', busy = false, generation = 0, loaded = false, unlockOpen = false;
@@ -86,6 +86,8 @@
       try {
         const route = archiveValue === undefined ? `/api/people${person.id ? '/' + person.id : ''}` : `/api/people/${person.id}/archive`;
         await request(route, json(person.id ? 'PUT' : 'POST', archiveValue === undefined ? person : { revision: person.revision, archived: archiveValue }));
+        if (token !== generation) return;
+        await onChanged();
         if (token !== generation) return;
         draft = null; notice = archiveValue === undefined ? 'Person saved.' : archiveValue ? 'Person archived.' : 'Person restored.';
         busy = false; await refresh();

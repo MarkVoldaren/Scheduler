@@ -173,7 +173,10 @@ app.post("/api/projects/:id/members", (req, res) => res.json(projects.add(projec
 app.delete("/api/projects/:id/members/:memberId", (req, res) => res.json(projects.remove(projectId(req.params.id), projectId(req.params.memberId), req.body || {})));
 
 app.get("/api/app-state", (req, res) => {
+  setNoCacheHeaders(res);
+  const roster = people.list();
   res.json({
+    peopleManHoursByDay: require("./people-domain").departmentHours(roster.people, roster.departments),
     settings: getOperationalSettings(),
     csvs: {
       workCenter: getCsvMetadata("work-center"),

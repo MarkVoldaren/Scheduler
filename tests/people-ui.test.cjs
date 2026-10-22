@@ -23,6 +23,17 @@ function setup(request, extras = {}, open = () => null) {
 const person = { id: 1, name: 'Jamie', hours: {mon:8,tue:8,wed:8,thu:8,fri:8,sat:0,sun:0}, allocations:[{department:'Cutting',percent:60},{department:'Kitting',percent:40}], revision:1, archived:false };
 const data = () => ({ people: [person], departments: ['Cutting', 'Kitting'] });
 
+test('successful People edits and restores notify capacity to refresh', async () => {
+  let refreshes = 0;
+  const app = setup(async (url, options) => options ? person : data(), { onChanged: async () => { refreshes++; } });
+  await app.ui.refresh();
+  await app.click({ edit: '1' });
+  await app.events.submit({ preventDefault() {}, target: { id: 'people-form' } });
+  assert.equal(refreshes, 1);
+  await app.click({ restore: '1' });
+  assert.equal(refreshes, 2);
+});
+
 test('People drops late roster responses after logout', async () => {
   let resolve;
   const app = setup(() => new Promise(done => { resolve = done; }));
