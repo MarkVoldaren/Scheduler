@@ -5,8 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check app.js && node --check scheduler-core.js && node --check pick-list-domain.js && node --check pick-list-store.js && node --check projects-domain.js && node --check projects-store.js && node --check projects-csv.js && node --check projects-ui.js && node --check projects-print.js && node --check people-domain.js && node --check people-store.js && node --check people-ui.js && node --check people-print.js",
-    "test": "node --test"
+    "check": "node --check source-departments.js && node --check request-client.js && node --check hours-ui.js && node --check hours-domain.js && node --check server.js && node --check app.js && node --check scheduler-core.js && node --check pick-list-domain.js && node --check pick-list-store.js && node --check projects-domain.js && node --check projects-store.js && node --check projects-csv.js && node --check projects-ui.js && node --check projects-print.js && node --check people-domain.js && node --check people-store.js && node --check people-ui.js && node --check people-print.js",
+    "test": "node --test",
+    "latency": "node scripts/latency-check.cjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

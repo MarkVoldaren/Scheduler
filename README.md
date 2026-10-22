@@ -192,4 +192,12 @@ On People, select **Print / PDF Report**, then **Print / Save PDF** in the repor
 
 The single-page layout shows all seven flows, department manning (including zero coverage), each person's manning within that flow, flow hours/manning, and unique shop totals. Multiple departments in the same flow are combined for each person. Archived people are excluded. Saved departments missing from the current CSV remain included and are marked with an asterisk; flow mappings use the same configured/default rules as the KPI Board. The displayed week is the current Monday–Sunday in America/Chicago and represents the recurring schedule, not attendance or historical hours.
 
+## Latency and recovery
+
+Available People departments are cached from the work-center source at startup and after a successful upload. Routine app-state and People reads calculate staffing from current roster records without reparsing the CSV. Missing, unreadable, or externally replaced work-center files invalidate department availability and add an optional `sourceWarning` to app-state and People responses. Saved assignments remain intact; re-upload or restart to rebuild availability.
+
+The browser shares in-flight app-state reads, isolates optional source failures, and keeps the current view when a staffing refresh fails. Reads have a 15-second deadline; writes/uploads have a 60-second deadline. An interrupted write may have succeeded: refresh saved data and compare before resubmitting. Capacity autosave pauses until saved settings are explicitly loaded after an unknown outcome.
+
+JS/CSS support conditional revalidation; HTML and session/app-state/People responses remain uncached. Run the read-only `npm run latency` check with `SCHEDULER_PASSWORD` set in the environment, and optionally `SCHEDULER_URL` (default: the production scheduler URL). It prints three-sample timings and exits unsuccessfully if the latency gates fail. See [the staged deployment guide](output/latency-deployment.md) for backups, rollback, acceptance checks, and local evidence.
+
 The report automatically scales all content to one portrait page without omitting names. Each flow has department totals on the left and two alphabetical columns of people, read down the first column then the second. Large rosters can produce small text; the report preview shows a reduced-size notice when scaling below 75%. No Capacity settings or KPI calculations are modified.

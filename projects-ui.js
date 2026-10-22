@@ -56,7 +56,7 @@
   globalThis.createProjectsUI = function ({ root, request, download, renderSequenceTrack, isActive }) {
     let projects = [], selectedId = null, detail = null, archived = false;
     let mode = "", candidateList = [], selectedMembers = new Set(), search = "", error = "", notice = "";
-    let busy = false, generation = 0;
+    let busy = false, generation = 0, outcomeUnknown = false;
     const json = (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const key = member => `${member.type}:${member.identifier}`;
     function scopeSummary(member) {
@@ -123,6 +123,7 @@
         const next = nextId ? await request(`/api/projects/${nextId}`) : null;
         if (token !== generation || mode) return;
         projects = result.projects; selectedId = nextId; detail = next; notice = "";
+        outcomeUnknown = false;
         render();
       } catch (err) {
         if (token !== generation) return;
@@ -131,12 +132,14 @@
     }
     async function perform(action) {
       if (busy) return;
+      if (outcomeUnknown) { error = "The previous save outcome is unknown. Refresh saved project data and compare before submitting again."; status(); return; }
       busy = true; ++generation; error = ""; notice = "Saving…"; status();
+      const token = generation;
       const controls = [...root.querySelectorAll("button, select, input, textarea")].filter(node => !node.disabled);
       controls.forEach(node => { node.disabled = true; });
       try { await action(); }
-      catch (err) { error = err.message; notice = ""; status(); }
-      finally { busy = false; controls.forEach(node => { if (node.isConnected) node.disabled = false; }); }
+      catch (err) { if (token !== generation || err.cancelled) return; if (err.outcomeUnknown) outcomeUnknown = true; error = err.message; notice = ""; status(); }
+      finally { if (token === generation) { busy = false; controls.forEach(node => { if (node.isConnected) node.disabled = false; }); } }
     }
     async function saved(result) {
       detail = result; selectedId = result.project.id; archived = result.project.archived;
@@ -219,6 +222,6 @@
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
     render();
-    return { refresh, clear() { ++generation; mode = ""; selectedId = null; detail = null; projects = []; selectedMembers.clear(); error = ""; notice = ""; render(); } };
+    return { refresh, clear() { ++generation; busy = false; outcomeUnknown = false; mode = ""; selectedId = null; detail = null; projects = []; selectedMembers.clear(); error = ""; notice = ""; render(); } };
   };
 })();

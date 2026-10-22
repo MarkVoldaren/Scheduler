@@ -109,6 +109,11 @@ const MAX_DATE = new Date(8640000000000000);
 
 const refs = createRefs();
 const state = createInitialState();
+const requestClient = globalThis.createSchedulerRequestClient({
+  fetch: (...args) => fetch(...args), resolveUrl: resolveApiUrl,
+  getGeneration: () => state.authGeneration,
+  onUnauthorized: () => setAuthenticated(false, "Your session expired. Sign in again."),
+});
 const projectsUI = globalThis.createProjectsUI({
   root: document.querySelector("#projects-root"),
   request: fetchJson,
@@ -127,7 +132,7 @@ const peopleUI = globalThis.createPeopleUI({
     catch (error) { alert("Person saved, but capacity could not refresh: " + error.message); }
   },
   buildReport: async () => {
-    const [roster, configuration] = await Promise.all([fetchJson("/api/people"), fetchJson("/api/app-state")]);
+    const [roster, configuration] = await Promise.all([fetchJson("/api/people"), requestAppState()]);
     const names = [...new Set([...roster.departments, ...roster.people.filter(person => !person.archived).flatMap(person => person.allocations.map(a => a.department))])];
     const flowState = { flowLocations: configuration.settings.flowLocations || {} };
     const mapping = Object.fromEntries(names.map(name => [name, getDepartmentFlowLocation(flowState, name)]));
@@ -136,21 +141,19 @@ const peopleUI = globalThis.createPeopleUI({
   unlock: async (password) => {
     const generation = state.authGeneration;
     await fetchJson("/api/admin/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
-    const appState = await fetchJson("/api/app-state");
+    const appState = await requestAppState();
     if (generation !== state.authGeneration) return;
     applyServerOperationalSettings(appState.settings || {});
     state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
+    state.settingsSaveUnknown = false;
+    document.querySelector("#capacity-reconcile").hidden = true;
     syncCapacities(state); syncFlowLocations(state); setAdminAuthenticated(true);
   },
 });
 
 async function downloadProjectCsv(url) {
-  const response = await fetch(resolveApiUrl(url), { credentials: "same-origin", cache: "no-store" });
-  if (response.status === 401) { setAuthenticated(false, "Your session expired. Sign in again."); throw new Error("Session expired."); }
-  if (!response.ok) throw new Error(`Download failed with status ${response.status}`);
-  const blob = await response.blob();
-  const match = (response.headers.get("Content-Disposition") || "").match(/filename="?([^";]+)"?/i);
-  downloadBlob(blob, match ? match[1] : "project.csv");
+  const blob = await requestClient.request(url, {}, "blob");
+  downloadBlob(blob, "project.csv");
 }
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob), link = document.createElement("a");
@@ -292,6 +295,25 @@ function createRefs() {
 }
 
 function bindEvents() {
+  document.querySelector("#capacity-reconcile").addEventListener("click", async () => {
+    if (!window.confirm("Discard local capacity changes and load the settings saved on the server?")) return;
+    const generation = state.authGeneration;
+    try {
+      const appState = await requestAppState();
+      if (generation !== state.authGeneration) return;
+      applyServerOperationalSettings(appState.settings || {});
+      state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
+      state.suppressSettingsSave = true;
+      try { syncCapacities(state); syncFlowLocations(state); }
+      finally { state.suppressSettingsSave = false; }
+      state.settingsSaveUnknown = false;
+      document.querySelector("#capacity-reconcile").hidden = true;
+      document.querySelector("#capacity-save-error").hidden = true;
+      renderActiveSurface();
+    } catch (error) {
+      if (generation === state.authGeneration && !error.cancelled) showAppStatus(error.message, null, "error");
+    }
+  });
   document.querySelector("#mobile-picking-open").addEventListener("click", () => {
     state.mobilePicking.from = state.filters.pickListDateFrom || "";
     state.mobilePicking.to = state.filters.pickListDateTo || "";
@@ -710,8 +732,10 @@ function bindEvents() {
 }
 
 async function initializeServerSession() {
+  const generation = state.authGeneration;
   try {
     const session = await fetchJson("/api/session", { allowUnauthorized: true });
+    if (generation !== state.authGeneration || state.loginPending) return;
     if (!session.authenticated) {
       setAuthenticated(false);
       return;
@@ -720,13 +744,20 @@ async function initializeServerSession() {
     setAdminAuthenticated(session.adminAuthenticated);
     await loadServerAppState();
   } catch (error) {
+    if (error.cancelled) return;
     console.error(error);
-    setAuthenticated(false, "Unable to reach the Scheduler server.");
+    if (state.authenticated) showAppStatus("Unable to load the schedule. " + error.message, loadServerAppState, "error");
+    else setLoginError("Unable to reach the Scheduler server. Try signing in again.");
   }
 }
 
 async function loginWithPassword(password) {
+  if (state.loginPending || state.logoutPending) return;
+  state.loginPending = true;
+  const generation = state.authGeneration;
   setLoginError("");
+  const button = refs.loginForm.querySelector('[type="submit"], button');
+  if (button) { button.disabled = true; button.textContent = "Signing in…"; }
   try {
     const session = await fetchJson("/api/login", {
       method: "POST",
@@ -734,6 +765,7 @@ async function loginWithPassword(password) {
       body: JSON.stringify({ password }),
       allowUnauthorized: true,
     });
+    if (generation !== state.authGeneration) return;
     if (!session.authenticated) {
       setLoginError("The password was not accepted.");
       return;
@@ -743,34 +775,60 @@ async function loginWithPassword(password) {
     setAdminAuthenticated(session.adminAuthenticated);
     await loadServerAppState();
   } catch (error) {
+    if (error.cancelled) return;
     console.error(error);
-    setLoginError(error.message || "Unable to sign in.");
+    if (state.authenticated) showAppStatus("Unable to load the schedule. " + error.message, loadServerAppState, "error");
+    else setLoginError(error.message || "Unable to sign in.");
+  } finally {
+    state.loginPending = false;
+    if (button) { button.disabled = false; button.textContent = "Enter Scheduler"; }
   }
 }
 
 async function logout() {
   if (state.currentView === "people" && !peopleUI.canLeave()) return;
   setAuthenticated(false);
-  projectsUI.clear();
-  try {
-    await fetchJson("/api/logout", { method: "POST", allowUnauthorized: true });
-  } catch (error) {
-    console.error(error);
-  }
+  const generation = state.authGeneration;
+  state.logoutPending = true;
   state.rawRows = [];
   state.jobs = [];
   state.shippingRows = [];
   state.workCenters = [];
   state.sourceName = DEFAULT_SOURCE_NAME;
   state.shippingSourceName = "";
-  setAuthenticated(false);
   renderSharedChrome(refs, state);
   renderError(refs, "Sign in to load the shared schedule.");
+  try {
+    await fetchJson("/api/logout", { method: "POST", allowUnauthorized: true });
+  } catch (error) {
+    if (generation === state.authGeneration && !error.cancelled) setLoginError("Sign-out could not be confirmed by the server. Try signing out again before leaving this shared browser.");
+  } finally {
+    if (generation === state.authGeneration) state.logoutPending = false;
+  }
 }
 
 function setAuthenticated(isAuthenticated, message = "") {
   state.authenticated = isAuthenticated;
   state.authGeneration += 1;
+  state.appStateRequest = null;
+  if (typeof requestClient !== "undefined") requestClient.cancelAll();
+  state.loadGeneration = (state.loadGeneration || 0) + 1;
+  state.pickGeneration = (state.pickGeneration || 0) + 1;
+  state.pickingRequest = null;
+  state.pickWriteUnknown = false;
+  state.pickDraft = null;
+  state.pickingRefreshing = false;
+  state.pickingSaving = false;
+  if (!isAuthenticated) {
+    state.appPhase = "signed-out";
+    state.settingsSaveUnknown = false;
+    state.settingsSaving = false;
+    state.settingsSaveQueued = false;
+    state.uploadUnknown = {};
+    showAppStatus("");
+    showSourceWarning("");
+    if (typeof projectsUI !== "undefined") projectsUI.clear();
+  }
   if (!isAuthenticated && typeof peopleUI !== "undefined") peopleUI.clear();
   if (!isAuthenticated && globalThis.HoursUI) globalThis.HoursUI.clear();
   if (!isAuthenticated) setAdminAuthenticated(false);
@@ -814,12 +872,14 @@ async function unlockCapacity(event) {
       body: JSON.stringify({ password: input.value }),
     });
     // Refresh before enabling edits, so this browser cannot overwrite newer settings.
-    const appState = await fetchJson("/api/app-state");
+    const appState = await requestAppState();
     if (generation !== state.authGeneration) return;
     applyServerOperationalSettings(appState.settings || {});
     state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
     syncCapacities(state);
     syncFlowLocations(state);
+    state.settingsSaveUnknown = false;
+    document.querySelector("#capacity-reconcile").hidden = true;
     setAdminAuthenticated(true);
     renderActiveSurface();
   } catch (error) {
@@ -838,37 +898,85 @@ function setLoginError(message) {
   refs.loginError.hidden = !message;
 }
 
+async function requestAppState() {
+  const generation = state.authGeneration;
+  if (state.appStateRequest?.generation === generation) return state.appStateRequest.promise;
+  const entry = { generation };
+  entry.promise = fetchJson("/api/app-state").finally(() => {
+    if (state.appStateRequest === entry) state.appStateRequest = null;
+  });
+  state.appStateRequest = entry;
+  return entry.promise;
+}
+
 async function loadServerAppState() {
-  const appState = await fetchJson("/api/app-state");
-  state.pickProgress = Object.fromEntries((await fetchJson("/api/pick-progress")).map(row => [row.key, row]));
-  applyServerOperationalSettings(appState.settings || {});
-  state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
-  state.activeCsvMeta = {
-    workCenter: appState.csvs?.workCenter || null,
-    pickList: appState.csvs?.pickList || null,
-  };
+  const generation = state.authGeneration;
+  const preserveSettings = state.settingsLoadedGeneration === generation && state.adminAuthenticated;
+  const token = state.loadGeneration = (state.loadGeneration || 0) + 1;
+  const current = () => generation === state.authGeneration && token === state.loadGeneration;
+  state.appPhase = "loading";
+  showAppStatus("Loading the shared schedule…");
+  renderError(refs, "Loading the shared schedule…");
+  try {
+    const appState = await requestAppState();
+    if (!current()) return;
+    showSourceWarning(appState.sourceWarning);
+    if (!preserveSettings) applyServerOperationalSettings(appState.settings || {});
+    state.settingsLoadedGeneration = generation;
+    state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
+    state.activeCsvMeta = {
+      workCenter: appState.csvs?.workCenter || null,
+      pickList: appState.csvs?.pickList || null,
+    };
 
-  let loadedWorkCenter = false;
-  if (state.activeCsvMeta.workCenter) {
-    const text = await fetchText("/api/csv/work-center");
-    hydrateFromCsv(text, state.activeCsvMeta.workCenter.originalName || "work-center.csv");
-    loadedWorkCenter = true;
+    const work = state.activeCsvMeta.workCenter;
+    const pick = state.activeCsvMeta.pickList;
+    const pickToken = state.pickGeneration = (state.pickGeneration || 0) + 1;
+    // Attach rejection handlers immediately; optional features settle independently.
+    const optional = Promise.allSettled([
+      fetchJson("/api/pick-progress").then(rows => {
+        if (current() && pickToken === state.pickGeneration) state.pickProgress = Object.fromEntries(rows.map(row => [row.key, row]));
+      }),
+      pick ? fetchText("/api/csv/pick-list").then(text => {
+        if (current() && pickToken === state.pickGeneration) hydrateShippingCsv(text, pick.originalName || "pick-list.csv", false);
+      }) : Promise.resolve(),
+      globalThis.HoursUI ? globalThis.HoursUI.refresh(appState) : Promise.resolve(),
+    ]);
+    if (work) {
+      const text = await fetchText("/api/csv/work-center");
+      if (!current()) return;
+      hydrateFromCsv(text, work.originalName || "work-center.csv");
+    } else {
+      renderSharedChrome(refs, state);
+      renderError(refs, "No work-center CSV uploaded yet. Choose CSV to create the active schedule.");
+    }
+    state.appPhase = "ready";
+    showAppStatus("");
+    const results = await optional;
+    if (!current()) return;
+    if (pickToken === state.pickGeneration) state.pickLoadError = results.slice(0, 2).find(result => result.status === "rejected")?.reason?.message || "";
+    if (state.currentView === "pick-list") renderPickListSurface();
+  } catch (error) {
+    if (!current() || error.cancelled) return;
+    state.appPhase = "failed";
+    renderError(refs, "The shared schedule could not be loaded.");
+    showAppStatus("Unable to load the schedule. " + error.message, loadServerAppState, "error");
   }
-
-  if (state.activeCsvMeta.pickList) {
-    const text = await fetchText("/api/csv/pick-list");
-    hydrateShippingCsv(text, state.activeCsvMeta.pickList.originalName || "pick-list.csv");
-  }
-
-  if (!loadedWorkCenter) {
-    renderSharedChrome(refs, state);
-    renderError(refs, "No work-center CSV uploaded yet. Choose CSV to create the active schedule.");
-  }
-  if (state.currentView === "projects") projectsUI.refresh();
-  if (globalThis.HoursUI) await globalThis.HoursUI.refresh();
 }
 
 async function uploadAndHydrateCsv(kind, file) {
+  const generation = state.authGeneration;
+  let committed = false;
+  if (state.uploadUnknown?.[kind]) {
+    showAppStatus("The previous upload outcome is unknown. Refresh saved source data before uploading again.", async () => {
+      await loadServerAppState();
+      if (generation === state.authGeneration && state.appPhase === "ready") {
+        state.uploadUnknown[kind] = false;
+        showAppStatus("Saved source data refreshed. Compare the source and uploaded time before choosing a file again.");
+      }
+    }, "error");
+    return;
+  }
   try {
     const formData = new FormData();
     formData.append("csv", file);
@@ -876,7 +984,9 @@ async function uploadAndHydrateCsv(kind, file) {
       method: "POST",
       body: formData,
     });
+    committed = true;
     const text = await fetchText(`/api/csv/${kind}`);
+    if (generation !== state.authGeneration) return;
     if (kind === "work-center") {
       state.activeCsvMeta.workCenter = uploadResult.metadata || null;
       hydrateFromCsv(text, uploadResult.metadata?.originalName || file.name);
@@ -886,51 +996,49 @@ async function uploadAndHydrateCsv(kind, file) {
       await refreshPicking();
     }
   } catch (error) {
+    if (generation !== state.authGeneration || error.cancelled) return;
+    if (error.outcomeUnknown) {
+      state.uploadUnknown ||= {};
+      state.uploadUnknown[kind] = true;
+    }
     console.error(error);
-    alert(error.message || "CSV upload failed.");
+    if (committed) showAppStatus("CSV saved, but the updated source could not be loaded. " + error.message, loadServerAppState, "error");
+    else alert(error.message || "CSV upload failed.");
   }
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(resolveApiUrl(url), {
-    credentials: "same-origin",
-    ...options,
-  });
-  if (response.status === 401 && !options.allowUnauthorized) {
-    setAuthenticated(false, "Your session expired. Sign in again.");
-    throw new Error("Session expired.");
-  }
-  let payload = {};
-  try {
-    payload = await response.json();
-  } catch {
-    payload = {};
-  }
-  if (!response.ok) {
-    const error = new Error(payload.error || `Request failed with status ${response.status}`);
-    error.status = response.status;
-    throw error;
-  }
-  return payload;
+  return requestClient.request(url, options);
 }
 
-async function fetchText(url) {
-  const response = await fetch(resolveApiUrl(url), { credentials: "same-origin" });
-  if (response.status === 401) {
-    setAuthenticated(false, "Your session expired. Sign in again.");
-    throw new Error("Session expired.");
-  }
-  if (!response.ok) {
-    let message = `Request failed with status ${response.status}`;
-    try {
-      const payload = await response.json();
-      message = payload.error || message;
-    } catch {
-      // Keep the generic HTTP status message.
-    }
-    throw new Error(message);
-  }
-  return response.text();
+async function fetchText(url, options = {}) {
+  return requestClient.request(url, options, "text");
+}
+
+function showSourceWarning(message = "") {
+  const element = document.querySelector("#source-warning");
+  if (!element) return;
+  element.textContent = message || "";
+  element.hidden = !message;
+}
+
+function showAppStatus(message = "", retry = null, phase = "loading") {
+  const element = document.querySelector("#app-status");
+  if (!element) return;
+  element.hidden = !message;
+  element.dataset.phase = phase;
+  document.querySelector("#app-status-message").textContent = message;
+  const button = document.querySelector("#app-retry");
+  button.hidden = !retry;
+  button.disabled = false;
+  const generation = state.authGeneration;
+  button.onclick = async () => {
+    if (generation !== state.authGeneration) return;
+    button.disabled = true;
+    try { await retry(); }
+    catch (error) { if (generation === state.authGeneration && !error.cancelled) showAppStatus(error.message, retry, "error"); }
+    finally { if (generation === state.authGeneration) button.disabled = false; }
+  };
 }
 
 function resolveApiUrl(url) {
@@ -1016,14 +1124,21 @@ function focusPickListSearch() {
 }
 
 function hydrateFromCsv(text, sourceName) {
+  const headers = parseCsvMatrix(String(text).replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0])[0] || [];
+  if (["WO #", "Manufacturing Work Center", "Hours Remaining", "Operation Sequence", "Status"].some(header => !headers.includes(header))) {
+    throw new Error("Work-center CSV is missing required columns. Re-upload a valid source.");
+  }
   const rows = parseCsv(text).filter(isSchedulableRow);
-  state.rawRows = rows;
   // Retain closed source rows for future metrics; buildJobs selects active work.
-  state.jobs = buildJobs(rows);
-  state.workCenters = deriveWorkCenters(state.jobs);
+  const jobs = buildJobs(rows);
+  const workCenters = deriveWorkCenters(jobs);
+  state.rawRows = rows;
+  state.jobs = jobs;
+  state.workCenters = workCenters;
   state.sourceName = sourceName;
-  syncCapacities(state);
-  syncFlowLocations(state);
+  state.suppressSettingsSave = true;
+  try { syncCapacities(state); syncFlowLocations(state); }
+  finally { state.suppressSettingsSave = false; }
   ensureSelectedSchedulerCenter(state);
   ensureSelectedDepartmentViewerCenter(state);
   ensureSelectedKpiDepartmentGroup(state);
@@ -1031,17 +1146,18 @@ function hydrateFromCsv(text, sourceName) {
   renderActiveSurface();
 }
 
-function hydrateShippingCsv(text, sourceName) {
-  state.shippingRows = parseShippingScheduleCsv(text);
+function hydrateShippingCsv(text, sourceName, render = true) {
+  const rows = parseShippingScheduleCsv(text);
   const counts = new Map();
-  state.shippingRows.forEach(row => {
+  rows.forEach(row => {
     row.pickKey = PickListDomain.key(row.raw);
     counts.set(row.pickKey, (counts.get(row.pickKey) || 0) + 1);
   });
-  state.shippingRows.forEach(row => { row.pickAmbiguous = counts.get(row.pickKey) !== 1; });
+  rows.forEach(row => { row.pickAmbiguous = counts.get(row.pickKey) !== 1; });
+  state.shippingRows = rows;
   state.shippingSourceName = sourceName;
   ensureSelectedPickListCustomer(state);
-  renderActiveSurface();
+  if (render) renderActiveSurface();
 }
 
 function renderActiveSurface() {
@@ -1106,6 +1222,7 @@ function renderDepartmentViewerSurface() {
 
 function renderPickListSurface() {
   renderSharedChrome(refs, state);
+  if (state.pickLoadError) showAppStatus("Pick List could not be refreshed. " + state.pickLoadError, () => refreshPicking(true), "error");
   if (state.mobilePicking.active) {
     renderMobilePicking();
     return;
@@ -1120,23 +1237,36 @@ function renderExpediteSurface() {
 
 async function refreshPeopleCapacity() {
   const generation = state.authGeneration;
-  const appState = await fetchJson("/api/app-state");
+  const appState = await requestAppState();
   if (generation !== state.authGeneration) return;
+  showSourceWarning(appState.sourceWarning);
   state.peopleManHoursByDay = appState.peopleManHoursByDay || {};
 }
 
 async function switchView(view) {
+  if (!state.authenticated) return;
+  if (state.appPhase === "loading" || state.appPhase === "failed") {
+    showAppStatus("Load the schedule before changing views.", loadServerAppState, "error");
+    return;
+  }
   const generation = state.authGeneration;
   const navigation = state.capacityNavigation = (state.capacityNavigation || 0) + 1;
-  if (state.currentView === "people" && view !== "people") {
-    if (!peopleUI.canLeave()) return;
-    peopleUI.leave();
-  }
   if (["capacity", "sequencers", "departments", "kpi", "expedite"].includes(view)) {
+    showAppStatus("Refreshing staffing before opening the selected view…");
     try { await refreshPeopleCapacity(); }
-    catch (error) { alert("Unable to refresh People capacity: " + error.message); return; }
+    catch (error) {
+      if (generation === state.authGeneration && navigation === state.capacityNavigation && !error.cancelled) {
+        showAppStatus("Unable to refresh staffing. The current view has been kept. " + error.message, () => switchView(view), "error");
+      }
+      return;
+    }
   }
   if (generation !== state.authGeneration || navigation !== state.capacityNavigation) return;
+  if (state.currentView === "people" && view !== "people") {
+    if (!peopleUI.canLeave()) { showAppStatus(""); return; }
+    peopleUI.leave();
+  }
+  showAppStatus("");
   setCurrentView(state, view);
   if (view === "pick-list") refreshPicking(true);
   renderActiveSurface();
@@ -1950,6 +2080,7 @@ function loadOperationalSetting(serverKey, storageKey) {
 }
 
 function saveOperationalSetting(serverKey, storageKey, value) {
+  if (state.suppressSettingsSave) return;
   if (state.usesServerSettings) {
     state.serverSettings[serverKey] = clonePlainObject(value);
     queueServerSettingsSave();
@@ -1959,7 +2090,7 @@ function saveOperationalSetting(serverKey, storageKey, value) {
 }
 
 function queueServerSettingsSave() {
-  if (!state.usesServerSettings || !state.adminAuthenticated) {
+  if (!state.usesServerSettings || !state.adminAuthenticated || state.settingsSaveUnknown || state.suppressSettingsSave) {
     return;
   }
   window.clearTimeout(state.settingsSaveTimer);
@@ -1967,7 +2098,10 @@ function queueServerSettingsSave() {
 }
 
 async function saveServerSettingsNow() {
-  if (!state.adminAuthenticated) return;
+  if (!state.adminAuthenticated || state.settingsSaveUnknown) return;
+  if (state.settingsSaving) { state.settingsSaveQueued = true; return; }
+  state.settingsSaving = true;
+  state.settingsSaveQueued = false;
   const generation = state.authGeneration;
   try {
     const settings = getOperationalSettingsPayload();
@@ -1977,15 +2111,26 @@ async function saveServerSettingsNow() {
       body: JSON.stringify(settings),
     });
     if (generation !== state.authGeneration) return;
-    state.serverSettings = normalizeOperationalSettings(payload.settings || settings);
+    if (!state.settingsSaveQueued) state.serverSettings = normalizeOperationalSettings(payload.settings || settings);
     document.querySelector("#capacity-save-error").hidden = true;
   } catch (error) {
     if (generation !== state.authGeneration) return;
     if (error.status === 403) setAdminAuthenticated(false);
+    state.settingsSaveQueued = false;
+    if (error.outcomeUnknown) {
+      state.settingsSaveUnknown = true;
+      window.clearTimeout(state.settingsSaveTimer);
+      document.querySelector("#capacity-reconcile").hidden = false;
+    }
     const errorElement = document.querySelector(error.status === 403 ? "#admin-unlock-error" : "#capacity-save-error");
-    errorElement.textContent = `Capacity settings were not saved. ${error.message}`;
+    errorElement.textContent = error.outcomeUnknown ? error.message : `Capacity settings were not saved. ${error.message}`;
     errorElement.hidden = false;
     console.error("Failed to save shared settings.", error);
+  } finally {
+    if (generation === state.authGeneration) {
+      state.settingsSaving = false;
+      if (state.settingsSaveQueued && !state.settingsSaveUnknown) queueServerSettingsSave();
+    }
   }
 }
 
@@ -3897,7 +4042,7 @@ function renderCapacity(targetRefs, viewModel) {
 function renderPickList(targetRefs, viewModel) {
   const markup = `
     <div class="pick-list-shell ${viewModel.loaded ? "" : "pick-list-shell-empty"}">
-      <div class="pick-list-backdrop" aria-hidden="${viewModel.loaded ? "true" : "false"}">
+      <div class="pick-list-backdrop" aria-hidden="${viewModel.loaded ? "false" : "true"}">
         ${createPickListControls(viewModel)}
         ${viewModel.loaded ? createPickListSections(viewModel) : createPickListPlaceholderBoard()}
       </div>
@@ -4312,34 +4457,57 @@ function createPickedCell(row) {
 }
 
 async function refreshPicking(reloadCsv = false) {
-  if (state.pickingRefreshing) return;
   const generation = state.authGeneration;
+  const pending = state.pickingRequest;
+  if (pending?.generation === generation) {
+    await pending.promise;
+    if (generation === state.authGeneration && reloadCsv && !pending.reloadCsv) return refreshPicking(true);
+    return;
+  }
+  const token = state.pickGeneration = (state.pickGeneration || 0) + 1;
+  const current = () => generation === state.authGeneration && token === state.pickGeneration;
+  const entry = { generation, reloadCsv };
+  state.pickingRequest = entry;
   state.pickingRefreshing = true;
-  try {
-    if (reloadCsv) {
-      const appState = await fetchJson("/api/app-state");
-      if (generation !== state.authGeneration) return;
-      state.activeCsvMeta.pickList = appState.csvs?.pickList || null;
-      if (state.activeCsvMeta.pickList) {
-        const text = await fetchText("/api/csv/pick-list");
-        if (generation !== state.authGeneration) return;
-        hydrateShippingCsv(text, state.activeCsvMeta.pickList.originalName);
+  entry.promise = (async () => {
+    try {
+      if (reloadCsv) {
+        const appState = await requestAppState();
+        if (!current()) return;
+        state.activeCsvMeta.pickList = appState.csvs?.pickList || null;
+        if (state.activeCsvMeta.pickList) {
+          const text = await fetchText("/api/csv/pick-list");
+          if (!current()) return;
+          hydrateShippingCsv(text, state.activeCsvMeta.pickList.originalName, false);
+        } else { state.shippingRows = []; state.shippingSourceName = ""; }
       }
+      const progress = await fetchJson("/api/pick-progress");
+      if (!current()) return;
+      state.pickProgress = Object.fromEntries(progress.map(row => [row.key, row]));
+      state.pickLoadError = "";
+      state.pickWriteUnknown = false;
+      if (state.currentView === "pick-list") showAppStatus(state.pickDraft ? `Saved picking refreshed. Your draft quantity is ${state.pickDraft.quantity}; saved quantity is ${state.pickProgress[state.pickDraft.key]?.quantity ?? 0}. Compare before submitting again.` : "");
+      if (state.currentView === "pick-list") renderPickListSurface();
+    } catch (error) {
+      if (!current() || error.cancelled) return;
+      state.pickLoadError = error.message || "Unable to refresh picking progress.";
+      if (state.currentView === "pick-list") renderPickListSurface();
+    } finally {
+      if (state.pickingRequest === entry) { state.pickingRequest = null; state.pickingRefreshing = false; }
     }
-    const progress = await fetchJson("/api/pick-progress");
-    if (generation !== state.authGeneration) return;
-    state.pickProgress = Object.fromEntries(progress.map(row => [row.key, row]));
-    if (state.currentView === "pick-list") renderPickListSurface();
-  } catch (error) {
-    alert(error.message || "Unable to refresh picking progress.");
-  } finally { state.pickingRefreshing = false; }
+  })();
+  return entry.promise;
 }
 
 async function editPickedQuantity(key) {
   if (state.pickingSaving) return;
+  if (state.pickWriteUnknown || state.pickLoadError || state.pickingRefreshing) {
+    showAppStatus("Refresh saved picking data before changing quantities.", () => refreshPicking(true), "error");
+    return;
+  }
   const generation = state.authGeneration;
   const current = state.pickProgress?.[key];
-  const entered = window.prompt("Total quantity pulled (enter 0 to clear):", String(current?.quantity ?? ""));
+  const entered = window.prompt("Total quantity pulled (enter 0 to clear):", String(state.pickDraft?.key === key ? state.pickDraft.quantity : current?.quantity ?? ""));
   if (entered === null) return;
   const quantity = Number(entered);
   if (!entered.trim() || !Number.isFinite(quantity) || quantity < 0) {
@@ -4347,6 +4515,7 @@ async function editPickedQuantity(key) {
     return;
   }
   state.pickingSaving = true;
+  state.pickDraft = { key, quantity };
   try {
     const rows = await fetchJson("/api/pick-progress", {
       method: "PUT", headers: { "Content-Type": "application/json" },
@@ -4354,12 +4523,15 @@ async function editPickedQuantity(key) {
     });
     if (generation !== state.authGeneration) return;
     state.pickProgress = Object.fromEntries(rows.map(row => [row.key, row]));
+    state.pickDraft = null;
     renderPickListSurface();
     [...refs.pickListRoot.querySelectorAll("[data-picked-key]")].find(element => element.dataset.pickedKey === key)?.focus();
   } catch (error) {
+    if (generation !== state.authGeneration || error.cancelled) return;
+    state.pickWriteUnknown = Boolean(error.outcomeUnknown);
     alert(error.message || "Unable to save quantity pulled.");
     await refreshPicking(true);
-  } finally { state.pickingSaving = false; }
+  } finally { if (generation === state.authGeneration) state.pickingSaving = false; }
 }
 
 function createPickListRow(row) {

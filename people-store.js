@@ -24,7 +24,7 @@ function createPeopleStore(db, getDepartments) {
     return current;
   }
   return {
-    list() { return { people: db.prepare('SELECT * FROM people').all().map(person).sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id), departments: getDepartments() }; },
+    list(departments = getDepartments()) { return { people: db.prepare('SELECT * FROM people').all().map(person).sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id), departments }; },
     create(input) {
       const data = domain.validate(input, getDepartments());
       const now = new Date().toISOString();

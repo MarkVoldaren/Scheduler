@@ -9,26 +9,54 @@
   document.body.append(dialog);
   let earned = [], metadata = null, scope = null, mode = 'month', trigger;
   const status = toolbar.querySelector('[role=status]');
-  async function refresh() {
+  const retry = document.createElement('button');
+  retry.className = 'button button-secondary'; retry.textContent = 'Retry earned hours'; retry.hidden = true;
+  toolbar.append(retry);
+  retry.addEventListener('click', () => refresh());
+  let refreshGeneration = 0, uploadUnknown = false, uploadDraft = null;
+  async function refresh(appState) {
+    const token = ++refreshGeneration;
     const generation = state.authGeneration;
-    const app = await fetchJson('/api/app-state');
-    const nextMetadata = app.csvs?.earnedHours || null;
-    const nextEarned = nextMetadata ? H.readEarned(await fetchText('/api/csv/earned-hours')) : [];
-    if (generation !== state.authGeneration || !state.authenticated) return false;
-    metadata = nextMetadata;
-    earned = nextEarned;
-    status.textContent = metadata ? `Earned hours uploaded ${formatCentralUploadTime(metadata.uploadedAt)}` : 'No earned-hours CSV uploaded';
-    return true;
+    try {
+      const app = appState || await requestAppState();
+      const nextMetadata = app.csvs?.earnedHours || null;
+      const nextEarned = nextMetadata ? H.readEarned(await fetchText('/api/csv/earned-hours')) : [];
+      if (token !== refreshGeneration || generation !== state.authGeneration || !state.authenticated) return false;
+      metadata = nextMetadata;
+      earned = nextEarned;
+      const reconciled = uploadUnknown;
+      uploadUnknown = false;
+      retry.hidden = true;
+      status.textContent = metadata ? `Earned hours uploaded ${formatCentralUploadTime(metadata.uploadedAt)}` : 'No earned-hours CSV uploaded';
+      if (reconciled) status.textContent += ` · Saved data refreshed. Compare it with ${uploadDraft?.name || 'your upload'} before choosing a file again.`;
+      return true;
+    } catch (error) {
+      if (token !== refreshGeneration || generation !== state.authGeneration || error.cancelled) return false;
+      status.textContent = 'Earned hours could not be refreshed. ' + error.message;
+      retry.hidden = false;
+      return false;
+    }
   }
-  globalThis.HoursUI = {refresh, clear() { earned = []; metadata = null; if (dialog.open) dialog.close(); dialog.innerHTML = ''; status.textContent = 'No earned-hours CSV uploaded'; }};
+  globalThis.HoursUI = {refresh, clear() { refreshGeneration++; earned = []; metadata = null; uploadUnknown = false; uploadDraft = null; retry.hidden = true; if (dialog.open) dialog.close(); dialog.innerHTML = ''; status.textContent = 'No earned-hours CSV uploaded'; }};
   toolbar.querySelector('input').addEventListener('change', async event => {
+    const generation = state.authGeneration;
     const file = event.target.files[0];
     if (!file) return;
+    if (uploadUnknown) { status.textContent = 'Refresh saved earned hours before uploading again. The previous upload outcome is unknown.'; retry.hidden = false; event.target.value = ''; return; }
+    uploadDraft = file;
+    let committed = false;
     try {
       const form = new FormData(); form.append('csv', file);
       await fetchJson('/api/csv/earned-hours', {method:'POST', body:form});
+      if (generation !== state.authGeneration) return;
+      committed = true;
       if (await refresh() && dialog.open) render();
-    } catch(error) { alert(error.message); }
+    } catch(error) {
+      if (generation !== state.authGeneration || error.cancelled) return;
+      uploadUnknown = Boolean(error.outcomeUnknown);
+      status.textContent = committed ? 'CSV saved, but earned hours could not be refreshed. ' + error.message : error.message;
+      retry.hidden = false;
+    }
     finally { event.target.value = ''; }
   });
   document.addEventListener('click', async event => {
@@ -39,7 +67,7 @@
     scope = button.hasAttribute('data-hours-center') ? {type:'center', name:button.dataset.hoursCenter} : button.hasAttribute('data-hours-flow') ? {type:'flow', name:button.dataset.hoursFlow} : {type:'plant', name:'Full Plant'};
     mode = 'month';
     try { if (await refresh()) { render(); if (!dialog.open) dialog.showModal(); } }
-    catch(error) { alert(error.message); }
+    catch(error) { if (!error.cancelled) { status.textContent = error.message; retry.hidden = false; } }
   });
   dialog.addEventListener('close', () => trigger?.focus());
   for (const eventName of ['focusin', 'mouseover']) dialog.addEventListener(eventName, event => {

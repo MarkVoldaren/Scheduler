@@ -1,0 +1,10 @@
+.git
+.cache
+.codex
+.agents
+node_modules
+data
+.env
+output
+tmp
+*.log

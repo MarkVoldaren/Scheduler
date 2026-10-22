@@ -98,6 +98,8 @@
       <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
 
       <div class="app-shell">
+        <div id="app-status" class="app-status" role="status" aria-live="polite" hidden><span id="app-status-message"></span> <button id="app-retry" class="button button-secondary" type="button" hidden>Retry</button></div>
+        <p id="source-warning" class="app-status" role="status" hidden></p>
         <button id="mobile-sidebar-toggle" class="icon-button mobile-sidebar-toggle mobile-sidebar-floating" type="button" aria-label="Open navigation">
           <span class="sidebar-toggle-lines" aria-hidden="true"></span>
         </button>
@@ -131,6 +133,7 @@
                   <button id="admin-return" class="button button-secondary" type="button">Return to Scheduler</button>
                 </form>
                 <p id="capacity-save-error" class="login-error" role="alert" hidden></p>
+                <button id="capacity-reconcile" class="button button-secondary" type="button" hidden>Load saved settings (discard local changes)</button>
                 <div id="capacity-grid" class="capacity-grid" hidden></div>
               </main>
             </section>
@@ -332,6 +335,7 @@
     <script src="people-domain.js"></script>
     <script src="people-ui.js"></script>
     <script src="people-print.js"></script>
+    <script src="request-client.js"></script>
     <script src="app.js"></script>
     <script src="hours-domain.js"></script>
     <script src="hours-ui.js"></script>

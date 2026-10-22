@@ -163,6 +163,13 @@ test('Session expiration cancels pending settings saves and removes capacity con
     document: { body: { dataset: {} }, querySelector: element }, setLoginError() {},
     fetch: async () => ({ status: 401 }), resolveApiUrl: value => value,
   });
+  context.showAppStatus = () => {};
+  context.showSourceWarning = () => {};
+  context.requestClient = require('../request-client')({
+    fetch: context.fetch, resolveUrl: value => value,
+    getGeneration: () => context.state.authGeneration,
+    onUnauthorized: () => context.setAuthenticated(false, 'Your session expired. Sign in again.'),
+  });
   vm.runInContext([fn('setAuthenticated'), fn('setAdminAuthenticated'), fn('fetchJson')].join('\n'), context);
   await assert.rejects(vm.runInContext('fetchJson("/api/settings")', context), /Session expired/);
   assert.equal(context.state.adminAuthenticated, false);

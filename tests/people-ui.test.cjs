@@ -23,6 +23,23 @@ function setup(request, extras = {}, open = () => null) {
 const person = { id: 1, name: 'Jamie', hours: {mon:8,tue:8,wed:8,thu:8,fri:8,sat:0,sun:0}, allocations:[{department:'Cutting',percent:60},{department:'Kitting',percent:40}], revision:1, archived:false };
 const data = () => ({ people: [person], departments: ['Cutting', 'Kitting'] });
 
+test('uncertain People save retains draft and blocks another write until saved records are refreshed', async () => {
+  let writes = 0;
+  const app = setup(async (url, options) => {
+    if (!options) return {...data(),sourceWarning:'Source changed; saved assignments preserved.'};
+    writes++; throw Object.assign(new Error('The save outcome is unknown. Refresh saved data.'),{outcomeUnknown:true});
+  });
+  await app.ui.refresh(); assert.match(app.root.innerHTML,/Source changed/);
+  await app.click({edit:'1'});
+  app.events.input({target:{name:'person-name',value:'Retained draft',dataset:{}}});
+  await app.events.submit({preventDefault(){},target:{id:'people-form'}});
+  assert.match(app.root.innerHTML,/Retained draft/);
+  await app.events.submit({preventDefault(){},target:{id:'people-form'}}); assert.equal(writes,1);
+  app.allowLeave(); await app.click({action:'reload'});
+  assert.match(app.root.innerHTML,/Jamie/);
+  await app.events.submit({preventDefault(){},target:{id:'people-form'}}); assert.equal(writes,2);
+});
+
 test('successful People edits and restores notify capacity to refresh', async () => {
   let refreshes = 0;
   const app = setup(async (url, options) => options ? person : data(), { onChanged: async () => { refreshes++; } });

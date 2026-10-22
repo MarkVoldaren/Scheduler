@@ -9,10 +9,10 @@ const multer = require("multer");
 const { readWorkCenter } = require("./projects-domain");
 const { createProjectsStore } = require("./projects-store");
 const { createPeopleStore } = require("./people-store");
-const schedulerCore = require("./scheduler-core");
 const pickDomain = require("./pick-list-domain");
 const hoursDomain = require("./hours-domain");
 const { createPickListStore } = require("./pick-list-store");
+const { createSourceDepartments } = require("./source-departments");
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -95,14 +95,14 @@ function projectSource() {
   }
 }
 const projects = createProjectsStore(db, projectSource);
-const people = createPeopleStore(db, () => {
-  const { rows } = projectSource();
-  if (!rows) return [];
-  return [...new Set(schedulerCore.buildJobs(rows).flatMap(job => job.operations)
-    .filter(operation => operation.phase !== "complete" && operation.hoursRemaining > 0 && operation.workCenter)
-    .map(operation => operation.workCenter))].sort((a, b) => a.localeCompare(b));
-});
+const sourceDepartments = createSourceDepartments(getActiveCsvPath("work-center"), () => getCsvMetadata("work-center"));
+const people = createPeopleStore(db, () => sourceDepartments.read().departments);
+function peopleWithSource() {
+  const source = sourceDepartments.read();
+  return { ...people.list(source.departments), sourceWarning: source.sourceWarning };
+}
 const initialProjectSource = projectSource();
+if (initialProjectSource.rows) sourceDepartments.publish(sourceDepartments.prepare(initialProjectSource.rows));
 if (initialProjectSource.rows) projects.reconcile(initialProjectSource.rows, initialProjectSource.metadata.uploadedAt);
 projects.initializeTrend();
 const upload = multer({
@@ -154,7 +154,7 @@ app.post("/api/admin/unlock", (req, res) => {
 });
 
 app.get("/api/projects", (req, res) => res.json(projects.list()));
-app.get("/api/people", (req, res) => { setNoCacheHeaders(res); res.json(people.list()); });
+app.get("/api/people", (req, res) => { setNoCacheHeaders(res); res.json(peopleWithSource()); });
 const requirePeopleAdmin = (req, res, next) => isAdmin(req) ? next() : res.status(403).json({ error: "Admin access required" });
 app.post("/api/people", requirePeopleAdmin, (req, res) => res.status(201).json(people.create(req.body || {})));
 app.put("/api/people/:id", requirePeopleAdmin, (req, res) => res.json(people.update(req.params.id, req.body || {})));
@@ -174,8 +174,9 @@ app.delete("/api/projects/:id/members/:memberId", (req, res) => res.json(project
 
 app.get("/api/app-state", (req, res) => {
   setNoCacheHeaders(res);
-  const roster = people.list();
+  const roster = peopleWithSource();
   res.json({
+    sourceWarning: roster.sourceWarning,
     peopleManHoursByDay: require("./people-domain").departmentHours(roster.people, roster.departments),
     settings: getOperationalSettings(),
     csvs: {
@@ -239,6 +240,7 @@ app.post("/api/csv/:kind", upload.single("csv"), (req, res, next) => {
         return res.status(400).json({ error: error.message });
       }
     }
+    const nextDepartments = workCenterRows ? sourceDepartments.prepare(workCenterRows) : null;
     const activePath = getActiveCsvPath(kind);
     const tempPath = `${activePath}.${process.pid}.${Date.now()}.tmp`;
     fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -254,6 +256,7 @@ app.post("/api/csv/:kind", upload.single("csv"), (req, res, next) => {
     // Serialize replacement and snapshot updates with other requests. Keep the
     // previous bytes if a database or filesystem write fails.
     const previous = fs.existsSync(activePath) ? fs.readFileSync(activePath) : null;
+    const previousDepartments = workCenterRows ? sourceDepartments.read() : null;
     let replaced = false;
     try {
       db.transaction(() => {
@@ -270,11 +273,13 @@ app.post("/api/csv/:kind", upload.single("csv"), (req, res, next) => {
       if (replaced) {
         if (previous) fs.writeFileSync(activePath, previous);
         else fs.rmSync(activePath, { force: true });
+        if (previousDepartments && !previousDepartments.sourceWarning) sourceDepartments.publish(previousDepartments.departments);
       }
       throw error;
     } finally {
       fs.rmSync(tempPath, { force: true });
     }
+    if (nextDepartments) sourceDepartments.publish(nextDepartments);
     res.json({ metadata });
   } catch (error) {
     next(error);
@@ -297,11 +302,15 @@ publicFiles.add("/hours-ui.js");
 publicFiles.add("/pick-list-domain.js");
 publicFiles.add("/people-domain.js");
 publicFiles.add("/people-print.js");
+publicFiles.add("/request-client.js");
 const publicAssets = express.static(__dirname, {
   extensions: ["html"],
-  etag: false,
-  lastModified: false,
-  setHeaders: setNoCacheHeaders,
+  etag: true,
+  lastModified: true,
+  setHeaders(res, file) {
+    if (/\.(js|css)$/.test(file)) res.setHeader("Cache-Control", "no-cache");
+    else setNoCacheHeaders(res);
+  },
 });
 app.use((req, res, next) => publicFiles.has(req.path) ? publicAssets(req, res, next) : next());
 app.get("*", (req, res) => {

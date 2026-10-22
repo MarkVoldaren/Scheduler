@@ -6,7 +6,7 @@
   const allocated = value => Number(value || 0).toFixed(2);
   const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   globalThis.createPeopleUI = function ({ root, request, isAdmin, unlock, lock, isActive, buildReport, onChanged = async () => {} }) {
-    let pendingReport = null;
+    let pendingReport = null, sourceWarning = '', outcomeUnknown = false;
     let people = [], departments = [], draft = null, baseline = '', retained = [];
     let search = '', department = '', archived = false, error = '', notice = '', busy = false, generation = 0, loaded = false, unlockOpen = false;
     const dirty = () => draft && JSON.stringify(draft) !== baseline;
@@ -15,6 +15,8 @@
       if (pendingReport && !pendingReport.closed) pendingReport.close();
       pendingReport = null;
       generation++; people = []; departments = []; draft = null; baseline = ''; retained = [];
+      sourceWarning = '';
+      outcomeUnknown = false;
       search = ''; department = ''; archived = false; error = ''; notice = ''; busy = false; loaded = false; unlockOpen = false;
       root.replaceChildren();
     }
@@ -26,6 +28,8 @@
         const result = await request('/api/people');
         if (token !== generation) return;
         people = result.people; departments = result.departments; loaded = true;
+        sourceWarning = result.sourceWarning || '';
+        outcomeUnknown = false;
       } catch (failure) { if (token === generation) error = failure.message; }
       finally { if (token === generation) { busy = false; render(); } }
     }
@@ -50,7 +54,7 @@
         </div>`).join('')}</div>
         <button class="button button-secondary" type="button" data-action="add-department" ${!departments.length ? 'disabled' : ''}>Add Department</button>
         <p id="people-allocation-summary" aria-live="polite"></p>
-        <div class="people-actions"><button class="button button-primary" type="submit" ${!isAdmin() ? 'disabled' : ''}>Save Person</button><button class="button button-secondary" type="button" data-action="cancel">Cancel</button>
+        <div class="people-actions"><button class="button button-primary" type="submit" ${!isAdmin() || outcomeUnknown ? 'disabled' : ''}>Save Person</button><button class="button button-secondary" type="button" data-action="cancel">Cancel</button>
         ${draft.id ? `<button class="button button-secondary" type="button" data-action="archive">${draft.archived ? 'Restore' : 'Archive'} Person</button>` : ''}
         ${error ? '<button class="button button-secondary" type="button" data-action="reload">Refresh saved record</button>' : ''}</div></fieldset></form>`;
     }
@@ -65,7 +69,7 @@
       const filterDepartments = [...new Set([...departments, ...people.flatMap(person => person.allocations.map(item => item.department))])].sort((a, b) => a.localeCompare(b));
       root.innerHTML = `<div class="people-heading"><div><p class="panel-kicker">Operations</p><h1>People</h1><p>Weekly scheduled hours and department assignments</p></div><button class="button button-secondary" data-action="report" ${busy || draft || !loaded ? 'disabled' : ''} title="All active people; 40 weekly hours = 1.0 manning">Print / PDF Report</button>${isAdmin() ? `<button class="button button-primary" data-action="add" ${busy || draft ? 'disabled' : ''}>Add Person</button>` : '<button class="button button-secondary" data-action="unlock">Unlock editing</button>'}</div>
         ${unlockOpen && !isAdmin() ? `<form id="people-unlock"><label>Admin password<input name="password" type="password" autocomplete="current-password" required></label><button class="button button-primary" ${busy ? 'disabled' : ''}>Unlock editing</button></form>` : ''}
-        ${status()}${loaded && !departments.length ? '<p class="people-notice">Upload a Work Center CSV with open departments before assigning a new department. Existing assignments can be retained.</p>' : ''}
+        ${status()}${sourceWarning ? `<p class="people-notice" role="status">${esc(sourceWarning)}</p>` : ''}${loaded && !departments.length ? '<p class="people-notice">Upload a Work Center CSV with open departments before assigning a new department. Existing assignments can be retained.</p>' : ''}
         ${draft ? form() : `<div class="people-filters"><label>Search people<input data-filter="search" type="search" value="${esc(search)}" placeholder="Search by name"></label><label>Department<select data-filter="department"><option value="">All departments</option>${filterDepartments.map(name => `<option ${name === department ? 'selected' : ''} value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label><label>Roster<select data-filter="archived"><option value="active" ${!archived ? 'selected' : ''}>Active</option><option value="archived" ${archived ? 'selected' : ''}>Archived</option></select></label><button class="button button-secondary" data-action="refresh" ${busy ? 'disabled' : ''}>Refresh</button></div><div id="people-list">${list()}</div>`}`;
       updateTotals();
     }
@@ -79,6 +83,7 @@
     function showError(failure) { error = failure.message; render(); root.querySelector('#people-status')?.focus(); }
     async function save(archiveValue, person = draft) {
       if (busy || !isAdmin()) return;
+      if (outcomeUnknown) { showError(new Error('Refresh saved records before submitting another change. The previous save outcome is unknown.')); return; }
       try { if (archiveValue === undefined) validate(draft, departments, retained); }
       catch (failure) { showError(failure); return; }
       const token = ++generation;
@@ -94,6 +99,7 @@
       } catch (failure) {
         if (token !== generation) return;
         busy = false;
+        if (failure.outcomeUnknown) outcomeUnknown = true;
         if (failure.status === 403) lock();
         showError(failure);
       }
