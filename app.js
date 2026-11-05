@@ -122,6 +122,12 @@ const projectsUI = globalThis.createProjectsUI({
   isActive: () => state.currentView === "projects" && document.body.dataset.auth === "unlocked",
 });
 
+const pickProjectUI = globalThis.PickProject.create({
+  request: fetchJson, getModel: () => getPickListViewModel(state), esc: escapeHtml,
+  getVersion: () => JSON.stringify([state.authGeneration, state.filters, state.shippingRows, state.jobs]),
+  viewProject: id => { switchView("projects"); if (id) projectsUI.openProject(id); },
+});
+
 const peopleUI = globalThis.createPeopleUI({
   root: document.querySelector("#people-root"), request: fetchJson,
   isAdmin: () => state.adminAuthenticated,
@@ -667,6 +673,7 @@ function bindEvents() {
       return;
     }
 
+    if (target.closest("[data-pick-project]")) { pickProjectUI.open(); return; }
     const exportButton = target.closest("[data-pick-list-export]");
     if (exportButton) {
       exportPickListGroup(exportButton.dataset.pickListExport);
@@ -828,6 +835,7 @@ function setAuthenticated(isAuthenticated, message = "") {
     showAppStatus("");
     showSourceWarning("");
     if (typeof projectsUI !== "undefined") projectsUI.clear();
+    if (typeof pickProjectUI !== "undefined") pickProjectUI.clear();
   }
   if (!isAuthenticated && typeof peopleUI !== "undefined") peopleUI.clear();
   if (!isAuthenticated && globalThis.HoursUI) globalThis.HoursUI.clear();
@@ -4040,6 +4048,7 @@ function renderCapacity(targetRefs, viewModel) {
 }
 
 function renderPickList(targetRefs, viewModel) {
+  if (typeof pickProjectUI !== "undefined") pickProjectUI.check();
   const markup = `
     <div class="pick-list-shell ${viewModel.loaded ? "" : "pick-list-shell-empty"}">
       <div class="pick-list-backdrop" aria-hidden="${viewModel.loaded ? "false" : "true"}">
@@ -4294,6 +4303,7 @@ function createPickListControls(viewModel) {
         </select>
         <button class="button button-secondary" type="button" data-pick-list-print="all">Print All</button>
       </div>
+      <button class="button button-secondary" type="button" data-pick-project>Add to Project</button>
       <button class="button button-primary" type="button" data-pick-list-export="all">Export All</button>
     </section>
   `;

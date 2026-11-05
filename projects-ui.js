@@ -222,6 +222,6 @@
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
     render();
-    return { refresh, clear() { ++generation; busy = false; outcomeUnknown = false; mode = ""; selectedId = null; detail = null; projects = []; selectedMembers.clear(); error = ""; notice = ""; render(); } };
+    return { refresh, openProject(id) { if (!leaveEditor()) return; selectedId = id; archived = false; refresh(); }, clear() { ++generation; busy = false; outcomeUnknown = false; mode = ""; selectedId = null; detail = null; projects = []; selectedMembers.clear(); error = ""; notice = ""; render(); } };
   };
 })();

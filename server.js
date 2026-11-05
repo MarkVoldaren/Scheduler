@@ -303,6 +303,7 @@ publicFiles.add("/pick-list-domain.js");
 publicFiles.add("/people-domain.js");
 publicFiles.add("/people-print.js");
 publicFiles.add("/request-client.js");
+publicFiles.add("/pick-project.js");
 const publicAssets = express.static(__dirname, {
   extensions: ["html"],
   etag: true,

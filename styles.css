@@ -4274,3 +4274,12 @@ body[data-mobile-picking="true"] #page-pick-list > main { padding: 0; background
 .app-status[data-phase="error"] { border-color: #dc6b64; }
 .app-status[hidden] { display: none; }
 .button[hidden] { display: none; }
+
+.pick-project-dialog { width: min(700px, 92vw); max-height: 85vh; overflow: auto; padding: 24px; border: 1px solid #888; border-radius: 12px; background: var(--surface, white); color: var(--text, #182230); }
+.pick-project-dialog::backdrop { background: #0008; }
+.pick-project-dialog button, .pick-project-dialog select { margin: 6px; padding: 8px 12px; }
+.pick-project-dialog ul { max-height: 30vh; overflow: auto; }
+
+.pick-project-dialog button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--panel-border-strong, #888); border-radius: 8px; cursor: pointer; }
+.pick-project-dialog button:disabled { opacity: .5; cursor: default; }
+.pick-project-dialog select { font: inherit; color: var(--text); background: var(--input-bg); }
