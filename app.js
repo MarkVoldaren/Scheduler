@@ -2279,6 +2279,7 @@ function normalizeShippingRow(row, index) {
   const shipDate = accelerationDate || originalShipDate;
   const createdHeader = Object.keys(row).find((header) => normalizeHeaderName(header) === "date created");
   const dateCreated = parseShippingCreatedDate(row[createdHeader]);
+  const toroProdLineHeader = Object.keys(row).find((header) => normalizeHeaderName(header) === "toro prod line #");
 
   return {
     id: `shipping-${index}`,
@@ -2294,6 +2295,7 @@ function normalizeShippingRow(row, index) {
     normalizedPart: normalizePartNumber(row["Part #"]),
     outsourcedSo: String(row["Outsourced? SO"] || "").trim(),
     customer: String(row["Cust."] || "").trim() || "No customer",
+    toroProdLine: String(row[toroProdLineHeader] || "").trim(),
     qtyNeeded,
     qtyCommitted,
     qtyRemaining: qtyNeeded - qtyCommitted,
@@ -4348,6 +4350,7 @@ function createPickListSection(group) {
                     <th>Effective Date</th>
                     <th>Part #</th>
                     <th>Customer</th>
+                    <th>Toro Prod Line #</th>
                     <th>SO / TO</th>
                     <th>P O #</th>
                     <th>Needed</th>
@@ -4448,6 +4451,7 @@ function renderMobilePicking() {
             <div><dt>Date</dt><dd>${escapeHtml(row.shipDateLabel)}</dd></div>
             <div class="mobile-pick-part"><dt>Part Number</dt><dd>${escapeHtml(row.partNumber)}</dd></div>
             <div class="mobile-pick-customer"><dt>Customer Group</dt><dd>${escapeHtml(getCustomerGroupName(row.customer))}</dd></div>
+            <div><dt>Toro Prod Line #</dt><dd>${escapeHtml(row.toroProdLine || "")}</dd></div>
             <div><dt>SO / TO</dt><dd>${escapeHtml(row.soTo)}</dd></div>
             <div><dt>Needed</dt><dd>${escapeHtml(String(row.qtyNeeded))}</dd></div>
             <div><dt>Committed</dt><dd>${escapeHtml(String(row.qtyCommitted))}</dd></div>
@@ -4557,6 +4561,7 @@ function createPickListRow(row) {
       )}${row.isEnteredToday ? '<span class="pick-list-entered-today-badge">Entered Today</span>' : ""}</span></td>
       <td><span class="pick-list-part"><strong>${escapeHtml(row.partNumber)}</strong>${outsourcedTag}</span></td>
       <td>${escapeHtml(row.customer)}</td>
+      <td>${escapeHtml(row.toroProdLine || "")}</td>
       <td>${escapeHtml(row.soTo)}</td>
       <td>${escapeHtml(row.poNumber)}</td>
       <td>${formatHours(row.qtyNeeded)}</td>
@@ -5244,6 +5249,7 @@ function createPickListPrintSection(group) {
                   <th>Shelf</th>
                   <th>SO/TO</th>
                   <th>Customer</th>
+                  <th>Toro Prod Line #</th>
                   <th>WO</th>
                   <th>Current OP</th>
                   <th>Next OP</th>
@@ -5259,7 +5265,7 @@ function createPickListPrintSection(group) {
 }
 
 function getPickListPrintColgroup() {
-  const widths = [7, 12, 4, 4, 4, 4, 6, 5, 8, 9, 8, 12, 14, 3];
+  const widths = [7, 11, 4, 4, 4, 4, 6, 5, 7, 8, 7, 7, 11, 12, 3];
   return `<colgroup>${widths.map((width) => `<col style="width:${width}%">`).join("")}</colgroup>`;
 }
 
@@ -5282,6 +5288,7 @@ function createPickListPrintRow(row) {
       <td class="shelf">${escapeHtml(row.shelf || "")}</td>
       <td>${escapeHtml(row.soTo || "")}</td>
       <td class="customer">${escapeHtml(row.customer || "")}</td>
+      <td>${escapeHtml(row.toroProdLine || "")}</td>
       <td class="wo">${escapeHtml(getPrintWoLabel(row))}</td>
       <td class="operation">${escapeHtml(formatPickListOperation(row.currentDepartment, row.currentOperation))}</td>
       <td class="operation">${escapeHtml(formatPickListOperation(row.nextDepartment, row.nextOperation))}</td>
@@ -5367,6 +5374,7 @@ function createPickListExportRow(group, row) {
     "Original Ship Date": row.originalShipDate ? formatDate(row.originalShipDate) : "",
     Accelerated: row.isAccelerated ? "Yes" : "No",
     Customer: row.customer,
+    "Toro Prod Line #": row.toroProdLine || "",
     "Part #": row.partNumber,
     "SO / TO": row.soTo,
     "P O #": row.poNumber,
